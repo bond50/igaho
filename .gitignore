@@ -1,0 +1,53 @@
+# --- IDE / OS ---
+.idea/
+.vscode/
+.DS_Store
+
+# --- Dependencies / build ---
+node_modules/
+.pnp/
+.pnp.js
+coverage/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Logs / debug ---
+npm-debug.log*
+yarn-*.log*
+pnpm-debug.log*
+logs/
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# --- Local env & secrets ---
+# keep example only
+.env
+.env.*
+!.env.example
+.envrc
+.envrc.local
+# prisma sometimes uses its own .env
+prisma/.env
+# package managers can hold tokens
+.npmrc
+.yarnrc*
+.pnpmrc
+
+# --- Certs / keys ---
+*.pem
+*.key
+*.crt
+*.pfx
+
+# --- Misc you had ---
+.scripts.zip
+.vercel
+lib/generated/prisma
+
+# --- Docker (the file itself should be a separate .dockerignore) ---
+.dockerignore

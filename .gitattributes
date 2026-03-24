@@ -1,0 +1,6 @@
+# Force text files to LF
+*                 text=auto eol=lf
+
+# Keep Windows endings only where they’re expected
+*.bat             eol=crlf
+*.cmd             eol=crlf
