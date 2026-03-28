@@ -1,26 +1,339 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f3f6fa;
+  --foreground: oklch(20% 0.028 264);
+  --brand: oklch(54% 0.15 255);
+  --brand-soft: color-mix(in oklab, var(--brand) 7%, white);
+  --brand-border: color-mix(in oklab, var(--brand) 16%, white);
+  --surface: rgba(255, 255, 255, 0.96);
+  --surface-muted: #f7f9fc;
+  --surface-elevated: #ffffff;
+  --surface-subtle: #f9fbfd;
+  --border-soft: rgba(148, 163, 184, 0.16);
+  --border-strong: rgba(100, 116, 139, 0.24);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-heading: var(--font-heading);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(circle at top left, color-mix(in oklab, var(--brand) 8%, transparent), transparent 20%),
+    radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand) 4%, transparent), transparent 24%),
+    linear-gradient(180deg, #f5f7fa 0%, #eef3f8 100%);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading), Georgia, serif;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+p,
+li,
+span,
+label,
+input,
+select,
+textarea,
+button {
+  text-wrap: pretty;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--brand) 22%, white);
+}
+
+@keyframes auth-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer components {
+  .portal-shell {
+    @apply flex min-h-[100dvh] overflow-x-hidden flex-col print:bg-white;
+    background:
+      radial-gradient(circle at top left, rgba(37, 99, 235, 0.035), transparent 16%),
+      linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
+  }
+
+  .portal-shell-grid {
+    @apply grid w-full flex-1 gap-0 px-0 py-0 sm:px-0 xl:px-0 print:block print:max-w-none print:px-0 print:py-0;
+  }
+
+  .portal-sidebar {
+    @apply flex h-[100dvh] min-h-[100dvh] max-h-[100dvh] flex-col overflow-hidden border-r border-slate-200 bg-white p-3 print:hidden sm:p-4;
+    box-shadow: 12px 0 30px rgba(15, 23, 42, 0.03);
+    backdrop-filter: blur(8px);
+  }
+
+  .portal-sidebar-top {
+    @apply shrink-0;
+  }
+
+  .portal-sidebar-body {
+    @apply mt-3 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1;
+  }
+
+  .portal-sidebar-footer {
+    @apply mt-auto shrink-0 space-y-2 border-t border-slate-100 pt-3;
+  }
+
+  .portal-brand {
+    @apply flex items-center gap-3 rounded-[20px] border px-4 py-4;
+    border-color: var(--border-soft);
+    background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(249,251,253,0.96) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  .portal-brand-mark {
+    @apply flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold text-white;
+    background: linear-gradient(135deg, var(--brand) 0%, color-mix(in oklab, var(--brand) 80%, #1e3a8a) 100%);
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.14);
+  }
+
+  .portal-brand-eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--brand)];
+  }
+
+  .portal-sidebar-group {
+    @apply mt-0;
+  }
+
+  .portal-sidebar-section + .portal-sidebar-section {
+    @apply border-t border-slate-100 pt-4;
+  }
+
+  .portal-collapsed-context {
+    @apply mb-3 items-center justify-center;
+  }
+
+  .portal-collapsed-context-label {
+    @apply rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-500;
+  }
+
+  .portal-sidebar-tone {
+    @apply mt-1 text-[11px] text-slate-400;
+  }
+
+  .portal-sidebar-label {
+    @apply px-2 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-400;
+  }
+
+  .portal-nav-item {
+    @apply relative flex items-center gap-3 rounded-xl border border-transparent px-3 py-2 text-sm text-slate-600 transition-all duration-200 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950;
+  }
+
+  .portal-nav-item-active {
+    @apply bg-slate-50 text-slate-950;
+    border-color: var(--border-soft);
+    box-shadow: inset 2px 0 0 var(--brand);
+  }
+
+  .portal-nav-icon {
+    @apply flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors group-hover:border-slate-300 group-hover:bg-slate-50 group-hover:text-slate-900;
+  }
+
+  .portal-nav-icon-active {
+    @apply border-[var(--brand-border)] bg-white text-[var(--brand)];
+  }
+
+  .portal-sidebar-mini-card {
+    @apply flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600;
+  }
+
+  .portal-nav-badge {
+    @apply inline-flex min-w-5 items-center justify-center rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-semibold text-white;
+  }
+
+  .portal-nav-flyout {
+    @apply pointer-events-none absolute left-full top-1/2 z-20 ml-3 hidden -translate-y-1/2 whitespace-nowrap rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-[0_14px_30px_rgba(15,23,42,0.12)] group-hover:flex;
+  }
+
+  .portal-footer-pill {
+    @apply inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600;
+  }
+
+  .portal-main-shell {
+    min-height: 100dvh;
+    width: 100%;
+  }
+
+  @media (min-width: 1280px) {
+    .portal-main-shell {
+      margin-left: 300px;
+      width: calc(100% - 300px);
+    }
+
+    .portal-main-shell.portal-main-shell-collapsed {
+      margin-left: 92px;
+      width: calc(100% - 92px);
+    }
+  }
+
+  .portal-header {
+    @apply sticky top-0 z-20 border-b border-slate-200 bg-white/96 px-4 py-2.5 print:hidden sm:px-5 sm:py-3 lg:px-6;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.028);
+    backdrop-filter: blur(10px);
+  }
+
+  .portal-topbar {
+    @apply flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 sm:gap-3 sm:pb-3;
+  }
+
+  .portal-search {
+    @apply flex h-10 w-full items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/90 px-4 text-sm text-slate-500 lg:max-w-md;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  .portal-search-input {
+    @apply w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400;
+  }
+
+  .portal-command-trigger {
+    @apply inline-flex h-10 min-w-[260px] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/90 px-4 text-sm text-slate-500 transition-colors hover:border-slate-300 hover:bg-white hover:text-slate-700;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  .portal-command-shortcut {
+    @apply ml-auto rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-400;
+  }
+
+  .portal-command-input {
+    @apply flex h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-500;
+  }
+
+  .portal-command-item {
+    @apply flex rounded-xl px-3 py-2.5 transition-colors hover:bg-slate-50;
+  }
+
+  .portal-icon-button {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900;
+  }
+
+  .portal-user-chip {
+    @apply inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  .portal-user-avatar {
+    @apply flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-[11px] font-semibold text-white;
+  }
+
+  .portal-page-head {
+    @apply pt-2.5;
+  }
+
+  .portal-page-panel {
+    @apply rounded-[18px] border px-4 py-3 print:hidden sm:rounded-[22px] sm:px-5 sm:py-4;
+    border-color: var(--border-soft);
+    background: linear-gradient(180deg, rgba(255,255,255,0.985) 0%, rgba(249,250,252,0.97) 100%);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.03);
+  }
+
+  .portal-page-block {
+    @apply mt-2 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between;
+  }
+
+  .portal-page-copy {
+    @apply min-w-0;
+  }
+
+  .portal-page-title {
+    font-family: var(--font-heading), Georgia, serif;
+    @apply text-[22px] font-medium leading-tight text-slate-950 sm:text-[27px];
+  }
+
+  .portal-page-description {
+    @apply mt-1.5 max-w-2xl text-[14px] leading-6 text-slate-600;
+  }
+
+  .portal-breadcrumbs {
+    @apply flex flex-wrap items-center gap-1.5 text-[11px] font-normal text-slate-400 sm:gap-2;
+  }
+
+  .portal-breadcrumb-sep {
+    @apply text-slate-300;
+  }
+
+  .portal-header-chip {
+    @apply inline-flex rounded-full border px-3 py-1 text-[11px] font-medium;
+  }
+
+  .portal-header-chip-brand {
+    @apply border-[var(--brand-border)] bg-[var(--brand-soft)] text-[var(--brand)];
+  }
+
+  .portal-header-chip-muted {
+    @apply border-slate-200 bg-slate-50 text-slate-500;
+  }
+
+  .portal-footer {
+    @apply mt-auto border-t border-slate-200 bg-white/95 px-4 py-4 text-sm print:hidden sm:px-5 lg:px-6;
+    box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.03);
+    backdrop-filter: blur(10px);
+  }
+
+  .portal-link-pill {
+    @apply rounded-full px-3 py-1.5 transition-colors hover:bg-slate-100 hover:text-slate-900;
+  }
+  .portal-surface-card {
+    @apply rounded-2xl border bg-white;
+    border-color: var(--border-soft);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  }
+
+  .portal-surface-panel {
+    @apply rounded-3xl border bg-white;
+    border-color: var(--border-soft);
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+  }
+
+  .portal-surface-muted {
+    @apply rounded-2xl border;
+    border-color: var(--border-soft);
+    background: var(--surface-subtle);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  }
+
+  .portal-kicker {
+    @apply text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400;
+  }
+
 }

@@ -1,11 +1,8 @@
-import React from 'react';
+import { getPortalBranding } from '@/features/application/queries/settings';
+import { AuthAccessForm } from '@/features/auth/components/auth-access-form';
 
-const Page = () => {
-    return (
-        <div>
-            Login Page
-        </div>
-    );
-};
+export default async function Page() {
+  const branding = await getPortalBranding();
 
-export default Page;
+  return <AuthAccessForm organizationName={branding.organizationName} />;
+}

@@ -1,4 +1,4 @@
-# AGENTS.md — IGAHO Project 
+# AGENTS.md — IGANO Project 
 
 
 It provides **strong architectural guidance** while allowing flexibility during development.
@@ -119,24 +119,64 @@ Server Action MUST:
 
 # 8. Forms Strategy
 
-Use:
+Default to:
 
 - shadcn/ui (UI)
-- React Hook Form (UX + field state)
+- native `<form action={...}>` submission
+- React 19 `useActionState` for server result state
+- React 19 `useFormStatus` for pending UI
 - Zod (validation)
 - Server Actions (submission)
 
+Use React Hook Form ONLY when the form is genuinely client-heavy, for example:
+
+- complex client-side field arrays
+- advanced controlled widgets
+- rich conditional UX that native forms do not handle cleanly
+
 ## Pattern
 
-- RHF handles inputs
-- Zod validates (client + server)
-- Server Action = source of truth
+- Server Action is the source of truth
+- Zod validates on the server always
+- `useActionState` handles returned form state
+- `useFormStatus` handles pending/disabled UI
+- native inputs are preferred over legacy submit handlers
 
 Never rely only on client validation.
+Never default to `onSubmit + startTransition` for ordinary forms when a form action will do.
+
+---
+
+# 8A. React 19 Rules
+
+This project should prefer modern React 19 patterns over legacy client-form patterns.
+
+Preferred defaults:
+
+- use `useActionState` for mutation forms
+- use `useFormStatus` for submit/loading states
+- use `useOptimistic` when latency would otherwise make the UI feel stale
+- use `useEffectEvent` instead of stale-closure effect workarounds
+- use `use` where async resource consumption is naturally expressed that way
+- write React Compiler-friendly code
+
+React Compiler guidance:
+
+- do not scatter `useMemo` and `useCallback` defensively
+- prefer straightforward render logic unless profiling proves otherwise
+- avoid manual memoization that fights the compiler
+
+Avoid as a default:
+
+- RHF for simple forms
+- imperative `onSubmit` handlers for standard mutations
+- `useTransition` as a substitute for form actions in ordinary submit flows
+- legacy patterns that duplicate server-action behavior on the client
 
 ---
 
 # 9. Feature Structure (Flexible)
+
 
 Preferred:
 
@@ -198,6 +238,22 @@ Always consider:
 - Avoid duplication
 
 ---
+# 13A. MCP and shadcn Preference Rule
+
+For this repo, Codex should proactively use the configured MCP servers when relevant:
+
+- Use **Next.js MCP** for Next.js runtime inspection, route/runtime diagnostics, and page verification
+- Use **shadcn MCP** for component discovery, registry lookup, examples, and add commands
+
+UI component rule:
+
+- If **shadcn/ui** already has the needed component or pattern, prefer that component first
+- Do not build a custom replacement when a suitable shadcn component already exists unless there is a clear project-specific reason
+- When introducing a new UI primitive, check shadcn MCP/registry first
+
+This is a strong default, not an excuse to ignore existing local code. Reuse current project patterns where appropriate.
+
+---
 
 # 14. Icon Rule
 
@@ -246,7 +302,8 @@ When fixing an issue:
 Use pnpm ONLY:
 
 - pnpm dev
-- pnpm build
+- pnpm ts-check
+- pnpm lint:ts
 - pnpm prisma migrate dev
 - pnpm prisma generate
 
@@ -269,3 +326,60 @@ Codex should:
 - follow existing patterns
 - avoid overengineering
 - deliver minimal, correct solutions
+
+# 21. Editing Strategy on Windows (IMPORTANT)
+
+On this project, Codex should avoid wasting time on repeated patch attempts when editing files on Windows.
+
+Rules:
+- Prefer direct file rewrites for small/medium files when a change is clear.
+- Default to direct rewrite first instead of trying sandbox patch tooling first.
+- Use apply_patch only when there is a strong reason and the edit is unusually safe for that tool path.
+- If a patch/apply_patch attempt fails once, DO NOT retry the same patch flow repeatedly.
+- Immediately switch to one of these:
+  1. rewrite the full target file
+  2. rewrite only the affected section using direct file write
+  3. output an exact copy-paste diff for manual application if file write is unsafe
+- Do not spend multiple turns re-attempting the same sandbox patch mechanism.
+- When changing several files, edit them one-by-one instead of one huge batch.
+- Prefer minimal deterministic edits over clever patching.
+
+Reason:
+- Patch tooling may fail at the Windows sandbox/tool-setup layer even when the code itself is correct.
+- In this repo, successful fallback has been direct file writing after patch failure.
+- Direct rewrite is the preferred default because it avoids burning time and credit on a tool path that fails frequently here.
+
+# 22. Command Execution Rule
+
+When working in this repo on Windows:
+
+- Avoid long inline PowerShell mutation commands when possible.
+- Prefer normal file writes over long pwsh -Command one-liners.
+- Avoid generating edit strategies that depend on fragile line-number insertion.
+- Prefer replacing a clearly identified component/function/block by content, not by approximate line offsets.
+
+
+# 23. Failure Escalation Rule
+
+If an edit tool fails because of sandbox/tooling and not code correctness:
+
+- Treat it as an environment issue, not a coding issue.
+- Do not re-investigate unrelated app code unless there is a real compile/runtime error.
+- Switch immediately to the next editing method.
+- After edits, validate with:
+  - pnpm ts-check
+  - pnpm build
+
+# 24. Validation Efficiency Rule
+
+To avoid wasting time and burning unnecessary credit:
+
+- Do NOT automatically run `pnpm build` after every successful `pnpm ts-check`.
+- Default validation should be `pnpm ts-check` only.
+- Run `pnpm build` only when it is actually justified, for example:
+  - route-level/server-component changes that may fail only at build time
+  - Next.js config/runtime integration changes
+  - changes affecting static generation, dynamic rendering, metadata, or bundling behavior
+  - when the user explicitly asks for a build verification
+- For ordinary component/form/copy/client-state changes, stop at `pnpm ts-check` unless there is a concrete reason to do more.
+- If `pnpm build` is skipped, say so briefly in the final response when relevant.

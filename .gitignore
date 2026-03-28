@@ -51,3 +51,11 @@ lib/generated/prisma
 
 # --- Docker (the file itself should be a separate .dockerignore) ---
 .dockerignore
+
+/prisma/src/generated/prisma
+
+extra/
+**/extra/
+
+secrets/
+**/secrets/
