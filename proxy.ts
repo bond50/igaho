@@ -23,6 +23,10 @@ function requiresAdmin(pathname: string) {
   );
 }
 
+function isSafeRedirectTarget(target: string | null) {
+  return !!target && target.startsWith('/') && !target.startsWith('//');
+}
+
 export const proxy = auth(async (req) => {
   const { nextUrl } = req;
   const pathname = nextUrl.pathname;
@@ -43,6 +47,10 @@ export const proxy = auth(async (req) => {
   }
 
   if (pathname.startsWith('/api') || pathname.startsWith('/trpc')) {
+    if (session?.mfaRequired && !session.mfaVerified) {
+      return NextResponse.json({ message: 'MFA required.' }, { status: 403 });
+    }
+
     return NextResponse.next();
   }
 
@@ -57,7 +65,7 @@ export const proxy = auth(async (req) => {
     }
     if (session.mfaVerified) {
       const nextParam = nextUrl.searchParams.get('next');
-      const dest = nextParam && nextParam.startsWith('/') ? nextParam : DEFAULT_LOGIN_REDIRECT;
+      const dest = isSafeRedirectTarget(nextParam) ? nextParam : DEFAULT_LOGIN_REDIRECT;
       return NextResponse.redirect(new URL(dest, nextUrl));
     }
     return NextResponse.next();
