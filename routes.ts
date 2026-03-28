@@ -1,5 +1,5 @@
 // routes.ts
-export const protectedRoutes: string[] = ['/dashboard', '/settings', '/account'];
+export const protectedRoutes: string[] = ['/dashboard', '/settings', '/account', '/apply', '/profile'];
 
 export const authRoutes: string[] = [
   '/auth/login',
