@@ -23,7 +23,7 @@ function requiresAdmin(pathname: string) {
   );
 }
 
-function isSafeRedirectTarget(target: string | null) {
+function isSafeRedirectTarget(target: string | null): target is string {
   return !!target && target.startsWith('/') && !target.startsWith('//');
 }
 
@@ -117,4 +117,3 @@ export const config = {
     '/(api|trpc)(.*)',
   ],
 };
-
