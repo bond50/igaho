@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useEffect, useMemo, useState } from 'react';
+import { useActionState, useState, useSyncExternalStore } from 'react';
 import { useFormStatus } from 'react-dom';
 import { AlertCircle, ArrowLeft, LoaderCircle, Mail, ShieldCheck, UserPlus } from 'lucide-react';
 
@@ -10,31 +10,61 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
-import { AuthShell } from '@/features/auth/components/auth-shell';
-import { GoogleLoginButton } from '@/features/auth/components/google-login-button';
 import { authAccessAction, type AuthAccessActionState } from '@/features/auth/actions/access';
 import { requestPasswordResetAction, type ResetPasswordActionState } from '@/features/auth/actions/reset-password';
+import { AuthShell } from '@/features/auth/components/auth-shell';
+import { GoogleLoginButton } from '@/features/auth/components/google-login-button';
 import { loginSchema, registerSchema } from '@/features/auth/schemas/auth';
 
 type LocalFieldErrors = Partial<Record<'email' | 'password' | 'confirmPassword' | 'code', string>>;
 type LastAuthMethod = 'google' | 'credentials' | null;
 
 const LAST_AUTH_METHOD_KEY = 'igaho:last-auth-method';
-
-const initialAuthAccessState: AuthAccessActionState = {
-  mode: 'email',
-  fieldErrors: {},
-  values: {
-    email: '',
-    code: '',
-  },
-};
+const LAST_AUTH_METHOD_EVENT = 'igaho:last-auth-method-changed';
 
 const initialPasswordSetupState: ResetPasswordActionState = {
   values: {
     email: '',
   },
 };
+
+function readLastAuthMethod(): LastAuthMethod {
+  if (typeof window === 'undefined') return null;
+
+  const storedMethod = window.localStorage.getItem(LAST_AUTH_METHOD_KEY);
+  return storedMethod === 'google' || storedMethod === 'credentials' ? storedMethod : null;
+}
+
+function subscribeToLastAuthMethod(onStoreChange: () => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === LAST_AUTH_METHOD_KEY) {
+      onStoreChange();
+    }
+  };
+
+  const handleCustom = () => {
+    onStoreChange();
+  };
+
+  window.addEventListener('storage', handleStorage);
+  window.addEventListener(LAST_AUTH_METHOD_EVENT, handleCustom);
+
+  return () => {
+    window.removeEventListener('storage', handleStorage);
+    window.removeEventListener(LAST_AUTH_METHOD_EVENT, handleCustom);
+  };
+}
+
+function setStoredLastAuthMethod(method: Exclude<LastAuthMethod, null>) {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem(LAST_AUTH_METHOD_KEY, method);
+  window.dispatchEvent(new Event(LAST_AUTH_METHOD_EVENT));
+}
 
 function SubmitButton({ children }: { children: React.ReactNode }) {
   const { pending } = useFormStatus();
@@ -106,10 +136,17 @@ export function AuthAccessForm({
     },
     success: initialSuccessMessage,
   });
+
   const [localErrors, setLocalErrors] = useState<LocalFieldErrors>({});
-  const [activeMode, setActiveMode] = useState<AuthAccessActionState['mode']>(initialMode);
-  const [lastAuthMethod, setLastAuthMethod] = useState<LastAuthMethod>(null);
-  const mode = activeMode;
+  const [modeOverride, setModeOverride] = useState<AuthAccessActionState['mode'] | null>(null);
+
+  const lastAuthMethod = useSyncExternalStore(
+    subscribeToLastAuthMethod,
+    readLastAuthMethod,
+    () => null,
+  );
+
+  const mode = modeOverride ?? state.mode ?? 'email';
   const emailValue = state.values?.email ?? '';
   const isEmailStep = mode === 'email';
   const isLoginStep = mode === 'login';
@@ -117,29 +154,12 @@ export function AuthAccessForm({
   const isOauthStep = mode === 'oauth';
   const twoFactorRequired = state.twoFactorRequired ?? false;
 
-  useEffect(() => {
-    setActiveMode(state.mode ?? 'email');
-    setLocalErrors(state.fieldErrors ?? {});
-  }, [state.fieldErrors, state.mode]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const storedMethod = window.localStorage.getItem(LAST_AUTH_METHOD_KEY);
-    if (storedMethod === 'google' || storedMethod === 'credentials') {
-      setLastAuthMethod(storedMethod);
-    }
-  }, []);
-
-  const fieldErrors = useMemo(
-    () => ({
-      email: localErrors.email ?? state.fieldErrors?.email,
-      password: localErrors.password ?? state.fieldErrors?.password,
-      confirmPassword: localErrors.confirmPassword ?? state.fieldErrors?.confirmPassword,
-      code: localErrors.code ?? state.fieldErrors?.code,
-    }),
-    [localErrors, state.fieldErrors],
-  );
+  const fieldErrors = {
+    email: localErrors.email ?? state.fieldErrors?.email,
+    password: localErrors.password ?? state.fieldErrors?.password,
+    confirmPassword: localErrors.confirmPassword ?? state.fieldErrors?.confirmPassword,
+    code: localErrors.code ?? state.fieldErrors?.code,
+  };
 
   const registrationComplete = isRegisterStep && Boolean(state.success) && !state.error;
   const statusMessage =
@@ -174,6 +194,7 @@ export function AuthAccessForm({
           if (isEmailStep) {
             const email = String(formData.get('email') ?? '').trim();
             const parsed = loginSchema.pick({ email: true }).safeParse({ email });
+
             if (!parsed.success) {
               event.preventDefault();
               const fields = parsed.error.flatten().fieldErrors;
@@ -190,7 +211,9 @@ export function AuthAccessForm({
               password: String(formData.get('password') ?? ''),
               code: String(formData.get('code') ?? ''),
             };
+
             const parsed = loginSchema.safeParse(values);
+
             if (!parsed.success) {
               event.preventDefault();
               const fields = parsed.error.flatten().fieldErrors;
@@ -209,7 +232,9 @@ export function AuthAccessForm({
               password: String(formData.get('password') ?? ''),
               confirmPassword: String(formData.get('confirmPassword') ?? ''),
             };
+
             const parsed = registerSchema.safeParse(values);
+
             if (!parsed.success) {
               event.preventDefault();
               const fields = parsed.error.flatten().fieldErrors;
@@ -222,12 +247,12 @@ export function AuthAccessForm({
             }
           }
 
-          if (!isEmailStep && typeof window !== 'undefined') {
-            window.localStorage.setItem(LAST_AUTH_METHOD_KEY, 'credentials');
-            setLastAuthMethod('credentials');
+          if (!isEmailStep) {
+            setStoredLastAuthMethod('credentials');
           }
 
           setLocalErrors({});
+          setModeOverride(null);
         }}
       >
         <input
@@ -238,7 +263,9 @@ export function AuthAccessForm({
 
         {isEmailStep ? (
           <Field>
-            <FieldLabel htmlFor="email" required>Email address</FieldLabel>
+            <FieldLabel htmlFor="email" required>
+              Email address
+            </FieldLabel>
             <Input
               id="email"
               name="email"
@@ -262,12 +289,13 @@ export function AuthAccessForm({
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Email</p>
                 <p className="mt-1 truncate text-sm font-medium text-slate-900">{emailValue}</p>
               </div>
+
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setActiveMode('email');
+                  setModeOverride('email');
                   setLocalErrors({});
                 }}
                 className="shrink-0"
@@ -276,6 +304,7 @@ export function AuthAccessForm({
                 Change
               </Button>
             </div>
+
             <input type="hidden" name="email" value={emailValue} />
           </div>
         )}
@@ -292,11 +321,14 @@ export function AuthAccessForm({
 
             <Field>
               <div className="flex items-center justify-between">
-                <FieldLabel htmlFor="password" required>Password</FieldLabel>
+                <FieldLabel htmlFor="password" required>
+                  Password
+                </FieldLabel>
                 <Link href="/auth/reset" className="text-sm font-semibold text-[var(--brand)] hover:opacity-85">
                   Forgot password?
                 </Link>
               </div>
+
               <Input
                 id="password"
                 name="password"
@@ -319,9 +351,11 @@ export function AuthAccessForm({
                   <ShieldCheck className="h-4 w-4" />
                   Two-factor verification
                 </div>
+
                 <p className="text-sm leading-6 text-slate-700">
                   Enter the code from your email to complete the sign-in process.
                 </p>
+
                 <Field>
                   <FieldLabel htmlFor="code">Verification code</FieldLabel>
                   <Input
@@ -356,15 +390,19 @@ export function AuthAccessForm({
               </Alert>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <Link href={`/auth/verify-email?email=${encodeURIComponent(emailValue)}`} className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                <Link
+                  href={`/auth/verify-email?email=${encodeURIComponent(emailValue)}`}
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
                   Resend link
                 </Link>
+
                 <Button
                   type="button"
                   variant="outline"
                   className="rounded-xl"
                   onClick={() => {
-                    setActiveMode('email');
+                    setModeOverride('email');
                     setLocalErrors({});
                   }}
                 >
@@ -381,7 +419,9 @@ export function AuthAccessForm({
               </Alert>
 
               <Field>
-                <FieldLabel htmlFor="password" required>Password</FieldLabel>
+                <FieldLabel htmlFor="password" required>
+                  Password
+                </FieldLabel>
                 <Input
                   id="password"
                   name="password"
@@ -404,7 +444,9 @@ export function AuthAccessForm({
               </Field>
 
               <Field>
-                <FieldLabel htmlFor="confirmPassword" required>Confirm password</FieldLabel>
+                <FieldLabel htmlFor="confirmPassword" required>
+                  Confirm password
+                </FieldLabel>
                 <Input
                   id="confirmPassword"
                   name="confirmPassword"
@@ -431,7 +473,8 @@ export function AuthAccessForm({
             <Mail className="h-4 w-4" />
             <AlertTitle>Google sign-in found for this email</AlertTitle>
             <AlertDescription>
-              This account does not have a saved password yet. Continue with Google below, or email yourself a secure link to add a password.
+              This account does not have a saved password yet. Continue with Google below, or email yourself a secure
+              link to add a password.
             </AlertDescription>
           </Alert>
         ) : null}
