@@ -18,6 +18,7 @@ concurrency:
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   PROJECT_NAME: ${{ vars.PROJECT_NAME || 'web-apps' }}
+  APP_RAW: ${{ vars.APP || github.event.repository.name }}
   APP: ${{ vars.APP || github.event.repository.name }}
   PUBLIC_ENV_JSON: ${{ vars.PUBLIC_ENV_JSON || '' }}
   ACME_EMAIL: ${{ vars.ACME_EMAIL || '' }}

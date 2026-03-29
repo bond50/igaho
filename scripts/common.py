@@ -20,7 +20,7 @@ def resolve_env_name(auto_value: str | None) -> str:
 def resolve_app(auto_value: str | None) -> str:
     if auto_value and auto_value != 'auto':
         return slugify_app(auto_value)
-    raw = os.getenv('APP_RAW') or os.getenv('GITHUB_REPOSITORY', '').split('/')[-1] or 'app'
+    raw = os.getenv('APP') or os.getenv('APP_RAW') or os.getenv('GITHUB_REPOSITORY', '').split('/')[-1] or 'app'
     return slugify_app(raw)
 
 def load_json_from_env(varname: str) -> dict:
