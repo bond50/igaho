@@ -82,13 +82,14 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma.config.ts ./prisma.config.ts
 
 # Bring full node_modules from build (includes next + @swc/helpers + prisma CLI + sharp)
 COPY --from=build /app/node_modules ./node_modules
 
 # Ensure Next image optimizer cache is writable by non-root
 RUN mkdir -p /app/.next/cache /app/public/uploads \
- && chown -R 1001:1001 /app/.next /app/public /app/prisma /app/node_modules
+ && chown -R 1001:1001 /app/.next /app/public /app/prisma /app/node_modules /app/prisma.config.ts
 
 # Entry script: optionally run migrations, then start Next server
 RUN printf '%s\n' '#!/usr/bin/env sh' \
