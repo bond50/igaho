@@ -1,0 +1,444 @@
+name: 21 - Multiapp Web Autodeploy (standalone)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: autodeploy-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME || 'web-apps' }}
+  APP: ${{ vars.APP || github.event.repository.name }}
+  PUBLIC_ENV_JSON: ${{ vars.PUBLIC_ENV_JSON || '' }}
+  ACME_EMAIL: ${{ vars.ACME_EMAIL || '' }}
+
+jobs:
+  preflight:
+    name: "🛫 Preflight — AWS/SSM/ECR/DB"
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.pref.outputs.ready }}
+      env_name: ${{ steps.pref.outputs.env_name }}
+      ecr_repo_name: ${{ steps.pref.outputs.ecr_repo_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m pip install --upgrade pip boto3
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify scripts folder
+        run: |
+          set -e
+          test -d scripts || { echo "::error::Missing scripts/"; exit 1; }
+          ls -la scripts
+
+      # ✅ Early env sync (only on main, not PR)
+      - name: Early sync env to SSM
+        if: github.event_name != 'pull_request' && github.ref_name == 'main'
+        working-directory: ./scripts
+        env:
+          PUBLIC_ENV_JSON: ${{ env.PUBLIC_ENV_JSON || '' }}
+          RUNTIME_SECURE_JSON: ${{ secrets.RUNTIME_SECURE_JSON || '' }}
+        run: python env_sync.py --env "auto" --app "auto"
+
+      - id: pref
+        name: "Preflight (strict: SSM+EC2+ECR+DB auth)"
+        working-directory: ./scripts
+        run: python preflight.py
+
+  quality:
+    name: "✅ Quality"
+    runs-on: ubuntu-latest
+    container:
+      image: node:24.11.0-bookworm
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/cache@v4
+        with:
+          path: |
+            /root/.local/share/pnpm/store
+            node_modules
+          key: ${{ runner.os }}-node24-mod-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Enable pnpm (corepack)
+        run: corepack enable
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate (optional)
+        run: pnpm dlx prisma generate || true
+      - name: Lint (optional)
+        run: pnpm run lint --if-present -- --max-warnings=0 || true
+      - name: TS check (optional)
+        run: pnpm run ts-check --if-present || true
+
+  build_push:
+    name: "📦 Build & Push"
+    runs-on: ubuntu-latest
+    needs: [ preflight, quality ]
+    if: needs.preflight.outputs.ready == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure jq and curl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # 🔍 Resolve EC2 + SG + public DNS from SSM (we already know env_name from preflight)
+      - name: Resolve EC2 + SG + DNS
+        id: ec2
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENV_NAME="${{ needs.preflight.outputs.env_name }}"
+          PARAM="/infra/${ENV_NAME}/ci/ec2_instance_id"
+          echo "Using env: $ENV_NAME (param: $PARAM)"
+
+          EC2_ID=$(aws ssm get-parameter \
+            --name "$PARAM" \
+            --query 'Parameter.Value' \
+            --output text)
+
+          SG_ID=$(aws ec2 describe-instances \
+            --instance-ids "$EC2_ID" \
+            --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' \
+            --output text)
+
+          PUBLIC_DNS=$(aws ec2 describe-instances \
+            --instance-ids "$EC2_ID" \
+            --query 'Reservations[0].Instances[0].PublicDnsName' \
+            --output text)
+
+          echo "ec2_id=$EC2_ID" >> "$GITHUB_OUTPUT"
+          echo "sg_id=$SG_ID" >> "$GITHUB_OUTPUT"
+          echo "public_dns=$PUBLIC_DNS" >> "$GITHUB_OUTPUT"
+
+      # 🌍 Current runner public IP (for /32 rule)
+      - name: Get runner public IP
+        id: runner_ip
+        shell: bash
+        run: |
+          set -euo pipefail
+          IP=$(curl -s https://checkip.amazonaws.com)
+          echo "Runner IP: $IP"
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
+      # 🔓 TEMPORARILY open Postgres (5432) to this runner ONLY
+      - name: Open DB for CI runner
+        id: open_db
+        shell: bash
+        run: |
+          set -euo pipefail
+          SG_ID="${{ steps.ec2.outputs.sg_id }}"
+          IP="${{ steps.runner_ip.outputs.ip }}/32"
+          echo "Authorizing $IP on sg $SG_ID (5432/tcp)…"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port 5432 \
+            --cidr "$IP" || {
+              echo "Ingress rule may already exist; continuing."
+            }
+
+
+
+      # 🧬 Create .env.production from PUBLIC_ENV_JSON + SSM (plain + secure)
+      - name: Create .env.production from SSM env
+        shell: bash
+        env:
+          PUBLIC_ENV_JSON: ${{ env.PUBLIC_ENV_JSON }}
+        run: |
+          set -euo pipefail
+
+          ENV_NAME="${{ needs.preflight.outputs.env_name }}"
+          APP_SLUG="${{ env.APP }}"
+          PUBLIC_DNS="${{ steps.ec2.outputs.public_dns }}"
+
+          echo "Building .env.production for env=${ENV_NAME}, app=${APP_SLUG}"
+          echo "EC2 public DNS for build-time DB traffic: ${PUBLIC_DNS}"
+
+          # Start fresh
+          : > .env.production
+
+          # 1) Public env (NEXT_PUBLIC_*) from repo vars (unchanged)
+          if [ -n "${PUBLIC_ENV_JSON:-}" ]; then
+            echo "Merging PUBLIC_ENV_JSON into .env.production"
+            echo "$PUBLIC_ENV_JSON" \
+              | jq -r 'to_entries|.[]|"\(.key)=\(.value)"' \
+              >> .env.production || true
+          else
+            echo "No PUBLIC_ENV_JSON provided; skipping public env merge."
+          fi
+
+          # 2) App plain + secure env from SSM (this includes DATABASE_URL, etc.)
+          PLAIN_PARAM="/infra/${ENV_NAME}/${APP_SLUG}/env/plain"
+          SECURE_PARAM="/infra/${ENV_NAME}/${APP_SLUG}/env/secure"
+
+          for PARAM in "$PLAIN_PARAM" "$SECURE_PARAM"; do
+            echo "Trying SSM param: $PARAM"
+            if aws ssm get-parameter --name "$PARAM" >/dev/null 2>&1; then
+              JSON=$(aws ssm get-parameter \
+                --with-decryption \
+                --name "$PARAM" \
+                --query 'Parameter.Value' \
+                --output text)
+              echo "Loaded $PARAM from SSM; merging into .env.production"
+              echo "$JSON" | jq -r 'to_entries|.[]|"\(.key)=\(.value)"' >> .env.production
+            else
+              echo "Param $PARAM not found; skipping."
+            fi
+          done
+
+          # 3) For CI build ONLY, rewrite DATABASE_URL host from 'postgres'
+          #    (docker service inside EC2) to the EC2 public DNS so GitHub can reach it.
+          if [ -n "${PUBLIC_DNS}" ] && grep -q '^DATABASE_URL=' .env.production; then
+            ORIG_LINE=$(grep '^DATABASE_URL=' .env.production | tail -n1)
+            ORIG_VALUE="${ORIG_LINE#DATABASE_URL=}"
+            echo "Original DATABASE_URL (masked host):"
+            echo "${ORIG_LINE}" | sed 's/@.*/@***:*****/'
+
+            # If the URL uses '@postgres:', rewrite just the host part for build time
+            UPDATED_VALUE=$(printf '%s' "${ORIG_VALUE}" | sed "s/@postgres:/@${PUBLIC_DNS}:/")
+            if [ "${UPDATED_VALUE}" != "${ORIG_VALUE}" ]; then
+              echo "Rewriting DATABASE_URL host to EC2 public DNS for build time..."
+              # Remove old DATABASE_URL lines and append the updated one
+              sed -i '/^DATABASE_URL=/d' .env.production
+              echo "DATABASE_URL=${UPDATED_VALUE}" >> .env.production
+            else
+              echo "DATABASE_URL did not contain '@postgres:'; leaving it as-is."
+            fi
+          else
+            echo "No DATABASE_URL in .env.production OR missing PUBLIC_DNS; no rewrite done."
+          fi
+
+          echo "Final .env.production (masked):"
+          sed 's/=.*/=***MASKED***/' .env.production || true
+
+      - name: Relax Prisma pool for CI build only
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! grep -q '^DATABASE_URL=' .env.production; then
+            echo "DATABASE_URL not found in .env.production; nothing to tweak."
+            exit 0
+          fi
+
+          echo "Tweaking Prisma connection_limit and pool_timeout for CI build..."
+
+          ORIG_LINE=$(grep '^DATABASE_URL=' .env.production | tail -n1)
+          ORIG_VALUE="${ORIG_LINE#DATABASE_URL=}"
+
+          # Strip any existing connection_limit/pool_timeout from the query string
+          BASE_VALUE="$ORIG_VALUE"
+          SEP='?'
+
+          if [[ "$ORIG_VALUE" == *'?'* ]]; then
+            BASE_VALUE=$(printf '%s' "$ORIG_VALUE" \
+              | sed -E 's/[?&](connection_limit|pool_timeout)=[0-9]+//g' \
+              | sed -E 's/[?&]$//')
+            SEP='&'
+          fi
+
+          UPDATED_VALUE="${BASE_VALUE}${SEP}connection_limit=10&pool_timeout=60"
+
+          # Replace DATABASE_URL line
+          sed -i '/^DATABASE_URL=/d' .env.production
+          echo "DATABASE_URL=${UPDATED_VALUE}" >> .env.production
+
+          echo "DATABASE_URL after tweak (masked):"
+          grep '^DATABASE_URL=' .env.production | sed 's/=.*/=***MASKED***/'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image tags
+        id: tags
+        shell: bash
+        env:
+          ECR_REPO_NAME_IN: ${{ needs.preflight.outputs.ecr_repo_name }}
+        run: |
+          set -euo pipefail
+          REG="${{ steps.ecr.outputs.registry }}"
+          REPO="${ECR_REPO_NAME_IN}"
+          [ -n "$REPO" ] && [ "$REPO" != "None" ] || { echo "::error::ECR repo name empty (preflight)."; exit 1; }
+          echo "sha=${REG}/${REPO}:${GITHUB_SHA}"   >> "$GITHUB_OUTPUT"
+          echo "latest=${REG}/${REPO}:latest"       >> "$GITHUB_OUTPUT"
+
+      - name: "Build & Push (PR — SHA only)"
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # 👇 Build for your EC2 host architecture (t3a.* → x86_64)
+          platforms: linux/amd64
+          tags: ${{ steps.tags.outputs.sha }}
+          # keep caching so subsequent builds are faster
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+
+
+
+      - name: "Build & Push (main — SHA + latest)"
+        if: github.event_name != 'pull_request' && github.ref_name == 'main'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # 👇 Build for EC2 host (x86_64)
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.tags.outputs.sha }}
+            ${{ steps.tags.outputs.latest }}
+          # keep caching so main builds also reuse layers
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+
+
+      # 🔐 ALWAYS close the DB hole, even if build fails
+      - name: Close DB for CI runner
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          SG_ID="${{ steps.ec2.outputs.sg_id }}"
+          IP="${{ steps.runner_ip.outputs.ip }}/32"
+          echo "Revoking $IP on sg $SG_ID (5432/tcp)…"
+          aws ec2 revoke-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port 5432 \
+            --cidr "$IP" || {
+              echo "Revoke failed (rule may already be gone)."
+            }
+
+  deploy_meta:
+    name: "📝 Deploy Meta (SSM env + DB)"
+    runs-on: ubuntu-latest
+    needs: [ preflight, build_push ]
+    if: github.event_name != 'pull_request' && github.ref_name == 'main' && needs.preflight.outputs.ready == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m pip install --upgrade pip boto3
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # (env sync moved earlier in preflight)
+      - name: Ensure DB (python, no migrations)
+        working-directory: ./scripts
+        run: python ensure_db.py --env "auto" --app "auto"
+
+      - name: Write deploy meta (python)
+        working-directory: ./scripts
+        env:
+          CONTAINER_PORT: ${{ vars.CONTAINER_PORT || '3000' }}
+          DOMAIN: ${{ vars.DOMAIN || '' }}
+          DOMAINS_JSON: ${{ vars.DOMAINS_JSON || '' }}
+        run: python deploy_meta.py
+
+  invoke_render:
+    name: "🔁 Invoke Render Doc"
+    needs: [ preflight, build_push, deploy_meta ]
+    if: github.event_name != 'pull_request' && needs.preflight.outputs.ready == 'true'
+    uses: ./.github/workflows/30-render-invoke.yml
+    with:
+      env_name: ${{ needs.preflight.outputs.env_name }}
+      region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      acme_email: ${{ vars.ACME_EMAIL || '' }}
+    secrets: inherit
+
+  notify_failure_pr:
+    name: "🔔 Notify — FAILURE (PR)"
+    needs: [ preflight, quality, build_push ]
+    if: github.event_name == 'pull_request' && (
+      needs.preflight.result == 'failure' || needs.preflight.result == 'cancelled' ||
+      needs.quality.result   == 'failure' || needs.quality.result   == 'cancelled' ||
+      needs.build_push.result== 'failure' || needs.build_push.result== 'cancelled'
+      )
+    uses: ./.github/workflows/31-notify.yml
+    with:
+      env_name: ${{ needs.preflight.outputs.env_name || 'develop' }}
+      region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      app: ${{ vars.APP || github.event.repository.name }}
+      status: failure
+      slack_message: "Autodeploy FAILED — PR branch=${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
+      slack_mention: "here"
+      email_subject: "Autodeploy FAILED (PR)"
+      email_body: "One or more jobs failed/cancelled — PR ${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
+    secrets: inherit
+
+  notify_failure_main:
+    name: "🔔 Notify — FAILURE (main)"
+    needs: [ preflight, quality, build_push, deploy_meta, invoke_render ]
+    if: github.event_name != 'pull_request' && (
+      needs.preflight.result    == 'failure' || needs.preflight.result    == 'cancelled' ||
+      needs.quality.result      == 'failure' || needs.quality.result      == 'cancelled' ||
+      needs.build_push.result   == 'failure' || needs.build_push.result   == 'cancelled' ||
+      needs.deploy_meta.result  == 'failure' || needs.deploy_meta.result  == 'cancelled' ||
+      needs.invoke_render.result== 'failure' || needs.invoke_render.result== 'cancelled'
+      )
+    uses: ./.github/workflows/31-notify.yml
+    with:
+      env_name: ${{ needs.preflight.outputs.env_name || 'develop' }}
+      region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      app: ${{ vars.APP || github.event.repository.name }}
+      status: failure
+      slack_message: "Autodeploy FAILED — branch=${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
+      slack_mention: "here"
+      email_subject: "Autodeploy FAILED"
+      email_body: "One or more jobs failed/cancelled — branch=${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
+    secrets: inherit
+
+  notify_success_main:
+    name: "🔔 Notify — SUCCESS"
+    needs: [ preflight, quality, build_push, deploy_meta, invoke_render ]
+    if: github.event_name != 'pull_request' &&
+      needs.preflight.result    == 'success' &&
+      needs.quality.result      == 'success' &&
+      needs.build_push.result   == 'success' &&
+      needs.deploy_meta.result  == 'success' &&
+      needs.invoke_render.result== 'success'
+    uses: ./.github/workflows/31-notify.yml
+    with:
+      env_name: ${{ needs.preflight.outputs.env_name }}
+      region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      app: ${{ vars.APP || github.event.repository.name }}
+      status: success
+      slack_message: "Autodeploy SUCCEEDED — branch=${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
+      email_subject: "Autodeploy SUCCEEDED"
+      email_body: "branch=${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
+    secrets: inherit
