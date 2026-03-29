@@ -1,0 +1,120 @@
+name: 30 - Invoke Render Doc (reusable)
+
+on:
+  # Reusable workflow
+  workflow_call:
+    inputs:
+      env_name:
+        type: string
+        required: false
+        default: ""
+      region:
+        type: string
+        required: false
+        default: ""
+      acme_email:
+        type: string
+        required: false
+        default: ""
+  # Manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      env_name:
+        description: "Environment name (prod/develop). Leave blank for auto."
+        required: false
+        default: ""
+      region:
+        description: "AWS region override. Leave blank to use repo default."
+        required: false
+        default: ""
+      acme_email:
+        description: "ACME email override (optional)."
+        required: false
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    # Unify inputs from workflow_call and workflow_dispatch
+    env:
+      WF_ENV_NAME: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.env_name || inputs.env_name || '' }}
+      WF_REGION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.region || inputs.region || '' }}
+      WF_ACME_EMAIL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.acme_email || inputs.acme_email || '' }}
+
+    steps:
+      - name: Ensure jq
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.WF_REGION != '' && env.WF_REGION || vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Invoke render via SSM
+        shell: bash
+        env:
+          IN_ENV_NAME: ${{ env.WF_ENV_NAME }}
+          IN_REGION: ${{ env.WF_REGION }}
+          IN_ACME_EMAIL: ${{ env.WF_ACME_EMAIL }}
+        run: |
+          set -Eeuo pipefail
+
+          echo "github.event_name=${GITHUB_EVENT_NAME}"
+          echo "IN_ENV_NAME='${IN_ENV_NAME}' IN_REGION='${IN_REGION}'"
+
+          # Env
+          ENV_NAME="${IN_ENV_NAME}"
+          if [ -z "$ENV_NAME" ]; then
+            case "${GITHUB_REF_NAME}" in
+              main) ENV_NAME="prod" ;;
+              develop|dev) ENV_NAME="develop" ;;
+              *) ENV_NAME="develop" ;;
+            esac
+          fi
+
+          # Region
+          REGION="${IN_REGION:-${AWS_REGION:-}}"
+          [ -n "$REGION" ] || REGION="us-east-1"
+          echo "Using env=${ENV_NAME} region=${REGION}"
+
+          BASE="/infra/${ENV_NAME}/ci"
+          RENDER_DOC="$(aws ssm get-parameter --name "${BASE}/ssm_render_doc" --query 'Parameter.Value' --output text 2>/dev/null || true)"
+          EC2_ID="$(aws ssm get-parameter --name "${BASE}/ec2_instance_id" --query 'Parameter.Value' --output text 2>/dev/null || true)"
+          [ -n "$RENDER_DOC" ] || { echo "::error::Missing ${BASE}/ssm_render_doc"; exit 1; }
+          [ -n "$EC2_ID" ]    || { echo "::error::Missing ${BASE}/ec2_instance_id"; exit 1; }
+
+          PARAMS="$(jq -n --arg env "$ENV_NAME" --arg reg "$REGION" --arg email "${IN_ACME_EMAIL:-}" \
+                     '{EnvName:[$env],Region:[$reg],AcmeEmail:[$email]}')"
+
+          echo "Invoking SSM document: $RENDER_DOC on EC2: $EC2_ID"
+          echo "Parameters: $PARAMS"
+
+          CMD_ID="$(aws ssm send-command \
+            --document-name "$RENDER_DOC" \
+            --instance-ids "$EC2_ID" \
+            --parameters "$PARAMS" \
+            --comment "render-invoke: ${GITHUB_REPOSITORY}@${GITHUB_SHA}" \
+            --query 'Command.CommandId' --output text)"
+          echo "render_cmd_id=$CMD_ID"
+
+          for _ in $(seq 1 60); do
+            STATUS="$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_ID" --query 'Status' --output text 2>/dev/null || true)"
+            echo "Current render status: ${STATUS:-<none>}"
+            case "$STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut)
+                echo "::error::render status=${STATUS}"
+                aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_ID" --output text || true
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+
+          echo "Final SSM invocation output:"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_ID" --output text || true

@@ -1,0 +1,128 @@
+name: 31 - Notify (reusable via SSM docs)
+
+on:
+  workflow_call:
+    inputs:
+      env_name: { type: string, required: false, default: "" }
+      region: { type: string, required: false, default: "" }
+      app: { type: string, required: false, default: "auto" }
+      status: { type: string, required: false, default: "success" } # success|failure
+      slack_message: { type: string, required: false, default: "" }
+      slack_mention: { type: string, required: false, default: "none" } # none|here|channel
+      email_subject: { type: string, required: false, default: "" }
+      email_body: { type: string, required: false, default: "" }
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v5
+
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region != '' && inputs.region || vars.AWS_REGION || 'us-east-1' }}
+      - name:  Ensure jq
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Decide env + region
+        id: envsel
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.env_name }}" ]; then
+            ENV_NAME="${{ inputs.env_name }}"
+          elif [ -n "${{ vars.ENVIRONMENT || '' }}" ]; then
+            ENV_NAME="${{ vars.ENVIRONMENT }}"
+          else
+            case "${GITHUB_REF_NAME}" in
+              main) ENV_NAME="prod" ;;
+              *)    ENV_NAME="develop" ;;
+            esac
+          fi
+          REGION="${{ inputs.region != '' && inputs.region || vars.AWS_REGION || 'us-east-1' }}"
+          echo "env=$ENV_NAME"  >> "$GITHUB_OUTPUT"
+          echo "region=$REGION" >> "$GITHUB_OUTPUT"
+
+      - name: Look up notify docs + instance
+        id: lookup
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="/infra/${{ steps.envsel.outputs.env }}/ci"
+          SLACK_DOC="$(aws ssm get-parameter --name "$BASE/notify_slack_doc" --query 'Parameter.Value' --output text 2>/dev/null || true)"
+          EMAIL_DOC="$(aws ssm get-parameter --name "$BASE/notify_email_doc" --query 'Parameter.Value' --output text 2>/dev/null || true)"
+          EC2_ID="$(aws ssm get-parameter --name "$BASE/ec2_instance_id"  --query 'Parameter.Value' --output text 2>/dev/null || true)"
+          echo "slack_doc=$SLACK_DOC" >> "$GITHUB_OUTPUT"
+          echo "email_doc=$EMAIL_DOC" >> "$GITHUB_OUTPUT"
+          echo "ec2_id=$EC2_ID"       >> "$GITHUB_OUTPUT"
+          [ -n "$EC2_ID" ] || { echo "::warning::Missing $BASE/ec2_instance_id — notifications will be skipped."; }
+
+      - name: Notify via SSM docs (Slack + Email)
+        if: ${{ steps.lookup.outputs.ec2_id != '' }}
+        shell: bash
+        env:
+          APP: ${{ inputs.app }}
+          STATUS: ${{ inputs.status }}
+          SLACK_DOC: ${{ steps.lookup.outputs.slack_doc }}
+          EMAIL_DOC: ${{ steps.lookup.outputs.email_doc }}
+          EC2_ID: ${{ steps.lookup.outputs.ec2_id }}
+          ENV_NAME: ${{ steps.envsel.outputs.env }}
+          REGION: ${{ steps.envsel.outputs.region }}
+          SLACK_MESSAGE: ${{ inputs.slack_message }}
+          SLACK_MENTION: ${{ inputs.slack_mention }}
+          EMAIL_SUBJECT: ${{ inputs.email_subject }}
+          EMAIL_BODY: ${{ inputs.email_body }}
+        run: |
+          set -Eeuo pipefail
+
+          # Compose defaults
+          APP="${APP:-auto}"
+          MSG="${SLACK_MESSAGE:-Deploy ${STATUS^^} for $APP}"
+          SUBJ="${EMAIL_SUBJECT:-[${ENV_NAME}] ${APP}: ${STATUS^^}}"
+          BODY="${EMAIL_BODY:-Deploy ${STATUS^^} for ${APP}}"
+
+          poll() {
+            local cmd_id="$1" ec2="$2"
+            for _ in $(seq 1 60); do
+              st="$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$ec2" --query 'Status' --output text 2>/dev/null || true)"
+              case "$st" in
+                Success) return 0 ;;
+                Failed|Cancelled|TimedOut)
+                  aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$ec2" --output text || true
+                  echo "::error::Notify command failed with status=$st"
+                  return 1 ;;
+              esac
+              sleep 3
+            done
+            echo "::error::Notify command timed out"
+            return 1
+          }
+
+          rc=0
+
+          if [ -n "${SLACK_DOC:-}" ]; then
+            SJSON="$(jq -cn --arg a "$APP" --arg e "$ENV_NAME" --arg m "$MSG" --arg men "$SLACK_MENTION" \
+                     '{App:[$a],EnvName:[$e],Message:[$m],Mention:[$men]}')"
+            SID="$(aws ssm send-command --document-name "$SLACK_DOC" --instance-ids "$EC2_ID" --parameters "$SJSON" \
+                  --comment "notify slack $APP ($ENV_NAME) $STATUS" --query 'Command.CommandId' --output text)"
+            poll "$SID" "$EC2_ID" || rc=1
+          else
+            echo "Slack doc not configured; skipping."
+          fi
+
+          if [ -n "${EMAIL_DOC:-}" ]; then
+            EJSON="$(jq -cn --arg a "$APP" --arg e "$ENV_NAME" --arg s "$SUBJ" --arg b "$BODY" \
+                     '{App:[$a],EnvName:[$e],Subject:[$s],Body:[$b]}')"
+            EID="$(aws ssm send-command --document-name "$EMAIL_DOC" --instance-ids "$EC2_ID" --parameters "$EJSON" \
+                  --comment "notify email $APP ($ENV_NAME) $STATUS" --query 'Command.CommandId' --output text)"
+            poll "$EID" "$EC2_ID" || rc=1
+          else
+            echo "Email doc not configured; skipping."
+          fi
+
+          exit "$rc"
