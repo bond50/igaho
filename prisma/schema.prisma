@@ -10,6 +10,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum UserRole {
@@ -163,55 +164,57 @@ model User {
 }
 
 model PaymentIntent {
-  id                 String                    @id @default(cuid())
-  userId             String                    @map("user_id")
-  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  purpose            PaymentPurpose            @default(APPLICATION_FEE)
-  applicationId      String?                   @unique @map("application_id")
-  application        MembershipApplication?    @relation("ApplicationFeeIntent", fields: [applicationId], references: [id], onDelete: SetNull)
-  membershipApplicationId String?              @map("membership_application_id")
-  membershipApplication MembershipApplication? @relation("MemberRenewalIntents", fields: [membershipApplicationId], references: [id], onDelete: SetNull)
-  billingYear        Int?                      @map("billing_year")
-  collectionMode     PaymentCollectionMode     @default(MPESA_DARAJA) @map("collection_mode")
-  provider           PaymentProvider           @default(MPESA_DARAJA)
-  paymentMethod      PaymentMethod
-  accountReference   String                    @map("account_reference")
-  providerReference  String?                   @map("provider_reference")
-  payerPhoneNumber   String?                   @map("payer_phone_number")
-  baseAmount         Int                       @map("base_amount")
-  taxAmount          Int                       @map("tax_amount")
-  totalAmount        Int                       @map("total_amount")
-  currency           String                    @default("KES")
-  status             PaymentIntentStatus       @default(CREATED)
-  verificationStatus PaymentVerificationStatus @default(PENDING) @map("verification_status")
-  verificationSource PaymentVerificationSource? @map("verification_source")
-  callbackPayload    Json?                     @map("callback_payload")
-  reconciliationPayload Json?                  @map("reconciliation_payload")
-  paymentInitiatedAt DateTime?                 @map("payment_initiated_at")
-  callbackReceivedAt DateTime?                 @map("callback_received_at")
-  lastVerifiedAt     DateTime?                 @map("last_verified_at")
-  lastError          String?                   @map("last_error")
-  verifiedAt         DateTime?                 @map("verified_at")
-  lockedAt           DateTime?                 @map("locked_at")
-  expiresAt          DateTime?                 @map("expires_at")
-  mpesaReceiptNumber String?                   @map("mpesa_receipt_number")
-  checkoutRequestId  String?                   @map("checkout_request_id")
-  requests           MpesaStkRequest[]
-  paymentRecords     MembershipPaymentRecord[]
-  incidents          PaymentIncident[]
-  createdAt          DateTime                  @default(now()) @map("created_at")
-  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  id                      String                     @id @default(cuid())
+  userId                  String                     @map("user_id")
+  user                    User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose                 PaymentPurpose             @default(APPLICATION_FEE)
+  applicationId           String?                    @unique @map("application_id")
+  application             MembershipApplication?     @relation("ApplicationFeeIntent", fields: [applicationId], references: [id], onDelete: SetNull)
+  membershipApplicationId String?                    @map("membership_application_id")
+  membershipApplication   MembershipApplication?     @relation("MemberRenewalIntents", fields: [membershipApplicationId], references: [id], onDelete: SetNull)
+  billingYear             Int?                       @map("billing_year")
+  collectionMode          PaymentCollectionMode      @default(MPESA_DARAJA) @map("collection_mode")
+  provider                PaymentProvider            @default(MPESA_DARAJA)
+  paymentMethod           PaymentMethod
+  accountReference        String                     @map("account_reference")
+  providerReference       String?                    @map("provider_reference")
+  payerPhoneNumber        String?                    @map("payer_phone_number")
+  baseAmount              Int                        @map("base_amount")
+  taxAmount               Int                        @map("tax_amount")
+  totalAmount             Int                        @map("total_amount")
+  currency                String                     @default("KES")
+  status                  PaymentIntentStatus        @default(CREATED)
+  verificationStatus      PaymentVerificationStatus  @default(PENDING) @map("verification_status")
+  verificationSource      PaymentVerificationSource? @map("verification_source")
+  callbackPayload         Json?                      @map("callback_payload")
+  reconciliationPayload   Json?                      @map("reconciliation_payload")
+  paymentInitiatedAt      DateTime?                  @map("payment_initiated_at")
+  callbackReceivedAt      DateTime?                  @map("callback_received_at")
+  lastVerifiedAt          DateTime?                  @map("last_verified_at")
+  lastError               String?                    @map("last_error")
+  verifiedAt              DateTime?                  @map("verified_at")
+  lockedAt                DateTime?                  @map("locked_at")
+  expiresAt               DateTime?                  @map("expires_at")
+  mpesaReceiptNumber      String?                    @map("mpesa_receipt_number")
+  checkoutRequestId       String?                    @map("checkout_request_id")
+  requests                MpesaStkRequest[]
+  paymentRecords          MembershipPaymentRecord[]
+  incidents               PaymentIncident[]
+  createdAt               DateTime                   @default(now()) @map("created_at")
+  updatedAt               DateTime                   @updatedAt @map("updated_at")
+
   @@map("payment_intents")
 }
 
 model UserNotificationState {
-  id                     String   @id @default(cuid())
-  userId                 String   @unique @map("user_id")
-  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lastReadAt             DateTime? @map("last_read_at")
-  dismissedNotificationIds String[] @default([]) @map("dismissed_notification_ids")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  id                       String    @id @default(cuid())
+  userId                   String    @unique @map("user_id")
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt               DateTime? @map("last_read_at")
+  dismissedNotificationIds String[]  @default([]) @map("dismissed_notification_ids")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
   @@map("user_notification_states")
 }
 
@@ -223,6 +226,7 @@ model ApplicationDraft {
   data        Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
   @@map("application_drafts")
 }
 
@@ -233,6 +237,7 @@ model ApplicantProfile {
   data      Json?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+
   @@map("applicant_profiles")
 }
 
@@ -246,55 +251,57 @@ model MembershipCategory {
   applications MembershipApplication[]
   createdAt    DateTime                @default(now()) @map("created_at")
   updatedAt    DateTime                @updatedAt @map("updated_at")
+
   @@map("membership_categories")
 }
 
 model ApplicationPortalSetting {
-  id                       String                @id @default(cuid())
-  singletonKey             String                @unique @default("default") @map("singleton_key")
-  setupName                String?               @map("setup_name")
-  shortName                String?               @map("short_name")
-  isFormOpen               Boolean               @default(false) @map("is_form_open")
-  isAcceptingApplications  Boolean               @default(false) @map("is_accepting_applications")
-  showApplicationFormAfterApproval Boolean       @default(false) @map("show_application_form_after_approval")
-  applicationReviewMode    ApplicationReviewMode @default(MANUAL_REVIEW) @map("application_review_mode")
-  renewalsEnabled          Boolean               @default(false) @map("renewals_enabled")
-  renewalMode              RenewalMode           @default(MANUAL_REVIEW) @map("renewal_mode")
-  renewalCoverageStartMonth Int                  @default(1) @map("renewal_coverage_start_month")
-  renewalCoverageStartDay  Int                   @default(1) @map("renewal_coverage_start_day")
-  renewalCoverageEndMonth  Int                   @default(12) @map("renewal_coverage_end_month")
-  renewalCoverageEndDay    Int                   @default(31) @map("renewal_coverage_end_day")
-  renewalGraceDays         Int                   @default(0) @map("renewal_grace_days")
-  renewalReminderLeadDays  Int                   @default(30) @map("renewal_reminder_lead_days")
-  renewalReminderFrequency RenewalReminderFrequency @default(WEEKLY) @map("renewal_reminder_frequency")
-  annualRenewalFee         Int                   @default(0) @map("annual_renewal_fee")
-  includeRenewalFeeInApplication Boolean         @default(false) @map("include_renewal_fee_in_application")
-  showCertificateToActiveMembers Boolean         @default(true) @map("show_certificate_to_active_members")
-  showCertificateWhenRenewalDue Boolean          @default(false) @map("show_certificate_when_renewal_due")
-  showMembershipCardToActiveMembers Boolean      @default(true) @map("show_membership_card_to_active_members")
-  showMembershipCardWhenRenewalDue Boolean       @default(false) @map("show_membership_card_when_renewal_due")
-  applicantMessage         String?               @map("applicant_message")
-  paymentCollectionMode    PaymentCollectionMode @default(MANUAL_PROOF) @map("payment_collection_mode")
-  applicationFee           Int                   @default(0) @map("application_fee")
-  isTaxEnabled             Boolean               @default(false) @map("is_tax_enabled")
-  taxPercentage            Int?                  @map("tax_percentage")
-  currency                 String                @default("KES")
-  manualPaymentInstructions String?              @map("manual_payment_instructions")
-  mpesaBusinessName        String?               @map("mpesa_business_name")
-  mpesaPaybillNumber       String?               @map("mpesa_paybill_number")
-  mpesaShortCode           String?               @map("mpesa_short_code")
-  darajaTransactionType    String?               @map("daraja_transaction_type")
-  isC2BEnabled             Boolean               @default(false) @map("is_c2b_enabled")
-  c2bShortCode             String?               @map("c2b_short_code")
-  c2bValidationUrl         String?               @map("c2b_validation_url")
-  c2bConfirmationUrl       String?               @map("c2b_confirmation_url")
-  c2bResponseType          String?               @map("c2b_response_type")
-  c2bRegisteredAt          DateTime?             @map("c2b_registered_at")
-  c2bLastRegistrationNote  String?               @map("c2b_last_registration_note")
-  updatedById              String?               @map("updated_by_id")
-  updatedBy                User?                 @relation("PortalSettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
-  createdAt                DateTime              @default(now()) @map("created_at")
-  updatedAt                DateTime              @updatedAt @map("updated_at")
+  id                                String                   @id @default(cuid())
+  singletonKey                      String                   @unique @default("default") @map("singleton_key")
+  setupName                         String?                  @map("setup_name")
+  shortName                         String?                  @map("short_name")
+  isFormOpen                        Boolean                  @default(false) @map("is_form_open")
+  isAcceptingApplications           Boolean                  @default(false) @map("is_accepting_applications")
+  showApplicationFormAfterApproval  Boolean                  @default(false) @map("show_application_form_after_approval")
+  applicationReviewMode             ApplicationReviewMode    @default(MANUAL_REVIEW) @map("application_review_mode")
+  renewalsEnabled                   Boolean                  @default(false) @map("renewals_enabled")
+  renewalMode                       RenewalMode              @default(MANUAL_REVIEW) @map("renewal_mode")
+  renewalCoverageStartMonth         Int                      @default(1) @map("renewal_coverage_start_month")
+  renewalCoverageStartDay           Int                      @default(1) @map("renewal_coverage_start_day")
+  renewalCoverageEndMonth           Int                      @default(12) @map("renewal_coverage_end_month")
+  renewalCoverageEndDay             Int                      @default(31) @map("renewal_coverage_end_day")
+  renewalGraceDays                  Int                      @default(0) @map("renewal_grace_days")
+  renewalReminderLeadDays           Int                      @default(30) @map("renewal_reminder_lead_days")
+  renewalReminderFrequency          RenewalReminderFrequency @default(WEEKLY) @map("renewal_reminder_frequency")
+  annualRenewalFee                  Int                      @default(0) @map("annual_renewal_fee")
+  includeRenewalFeeInApplication    Boolean                  @default(false) @map("include_renewal_fee_in_application")
+  showCertificateToActiveMembers    Boolean                  @default(true) @map("show_certificate_to_active_members")
+  showCertificateWhenRenewalDue     Boolean                  @default(false) @map("show_certificate_when_renewal_due")
+  showMembershipCardToActiveMembers Boolean                  @default(true) @map("show_membership_card_to_active_members")
+  showMembershipCardWhenRenewalDue  Boolean                  @default(false) @map("show_membership_card_when_renewal_due")
+  applicantMessage                  String?                  @map("applicant_message")
+  paymentCollectionMode             PaymentCollectionMode    @default(MANUAL_PROOF) @map("payment_collection_mode")
+  applicationFee                    Int                      @default(0) @map("application_fee")
+  isTaxEnabled                      Boolean                  @default(false) @map("is_tax_enabled")
+  taxPercentage                     Int?                     @map("tax_percentage")
+  currency                          String                   @default("KES")
+  manualPaymentInstructions         String?                  @map("manual_payment_instructions")
+  mpesaBusinessName                 String?                  @map("mpesa_business_name")
+  mpesaPaybillNumber                String?                  @map("mpesa_paybill_number")
+  mpesaShortCode                    String?                  @map("mpesa_short_code")
+  darajaTransactionType             String?                  @map("daraja_transaction_type")
+  isC2BEnabled                      Boolean                  @default(false) @map("is_c2b_enabled")
+  c2bShortCode                      String?                  @map("c2b_short_code")
+  c2bValidationUrl                  String?                  @map("c2b_validation_url")
+  c2bConfirmationUrl                String?                  @map("c2b_confirmation_url")
+  c2bResponseType                   String?                  @map("c2b_response_type")
+  c2bRegisteredAt                   DateTime?                @map("c2b_registered_at")
+  c2bLastRegistrationNote           String?                  @map("c2b_last_registration_note")
+  updatedById                       String?                  @map("updated_by_id")
+  updatedBy                         User?                    @relation("PortalSettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt                         DateTime                 @default(now()) @map("created_at")
+  updatedAt                         DateTime                 @updatedAt @map("updated_at")
+
   @@map("application_portal_settings")
 }
 
@@ -305,21 +312,22 @@ model ApplicationPaymentProofHistory {
   paymentProofUrl          String
   paymentProofOriginalName String
   archivedAt               DateTime              @default(now()) @map("archived_at")
+
   @@map("application_payment_proof_histories")
 }
 
 model MembershipApplication {
-  id                               String                @id @default(cuid())
-  userId                           String                @unique @map("user_id")
-  user                             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                               String                           @id @default(cuid())
+  userId                           String                           @unique @map("user_id")
+  user                             User                             @relation(fields: [userId], references: [id], onDelete: Cascade)
   paymentProofHistory              ApplicationPaymentProofHistory[]
-  paymentIntent                    PaymentIntent?             @relation("ApplicationFeeIntent")
-  renewalPaymentIntents            PaymentIntent[]            @relation("MemberRenewalIntents")
+  paymentIntent                    PaymentIntent?                   @relation("ApplicationFeeIntent")
+  renewalPaymentIntents            PaymentIntent[]                  @relation("MemberRenewalIntents")
   paymentRecords                   MembershipPaymentRecord[]
   paymentIncidents                 PaymentIncident[]
   mpesaC2BReceipts                 MpesaC2BReceipt[]
   mpesaStkRequests                 MpesaStkRequest[]
-  status                           ApplicationStatus     @default(PENDING)
+  status                           ApplicationStatus                @default(PENDING)
   salutation                       String
   firstName                        String
   surname                          String
@@ -336,9 +344,9 @@ model MembershipApplication {
   nextOfKinSurname                 String?
   nextOfKinRelationship            String?
   nextOfKinPhone                   String?
-  idNumber                         String                @unique
-  email                            String                @unique
-  phoneNumber                      String                @unique
+  idNumber                         String                           @unique
+  email                            String                           @unique
+  phoneNumber                      String                           @unique
   alternativePhoneNumber           String?
   profession                       String?
   currentJobTitle                  String?
@@ -353,9 +361,9 @@ model MembershipApplication {
   regulatoryBody                   String?
   yearOfRegistration               String?
   membershipType                   MembershipType
-  membershipNumber                 String?               @unique @map("membership_number")
-  membershipCategoryId             String                @map("membership_category_id")
-  membershipCategoryRef            MembershipCategory    @relation(fields: [membershipCategoryId], references: [id], onDelete: Restrict)
+  membershipNumber                 String?                          @unique @map("membership_number")
+  membershipCategoryId             String                           @map("membership_category_id")
+  membershipCategoryRef            MembershipCategory               @relation(fields: [membershipCategoryId], references: [id], onDelete: Restrict)
   membershipCategory               String
   preferredChapterOrRegion         String?
   refereeOneName                   String?
@@ -366,16 +374,16 @@ model MembershipApplication {
   refereeTwoPhone                  String?
   refereeTwoEmail                  String?
   refereeTwoRelationship           String?
-  paymentCollectionMode            PaymentCollectionMode @default(MANUAL_PROOF) @map("payment_collection_mode")
+  paymentCollectionMode            PaymentCollectionMode            @default(MANUAL_PROOF) @map("payment_collection_mode")
   paymentMethod                    PaymentMethod
-  payerPhoneNumber                 String?               @map("payer_phone_number")
-  paymentBaseAmount                Int?                  @map("payment_base_amount")
-  paymentTaxAmount                 Int?                  @map("payment_tax_amount")
-  paymentTotalAmount               Int?                  @map("payment_total_amount")
-  currency                         String                @default("KES")
-  transactionReferenceNumber       String?               @map("transaction_reference_number")
-  paymentProofUrl                  String?               @map("payment_proof_url")
-  paymentProofOriginalName         String?               @map("payment_proof_original_name")
+  payerPhoneNumber                 String?                          @map("payer_phone_number")
+  paymentBaseAmount                Int?                             @map("payment_base_amount")
+  paymentTaxAmount                 Int?                             @map("payment_tax_amount")
+  paymentTotalAmount               Int?                             @map("payment_total_amount")
+  currency                         String                           @default("KES")
+  transactionReferenceNumber       String?                          @map("transaction_reference_number")
+  paymentProofUrl                  String?                          @map("payment_proof_url")
+  paymentProofOriginalName         String?                          @map("payment_proof_original_name")
   declarationConfirmed             Boolean
   codeOfConductAccepted            Boolean
   dataProcessingConsent            Boolean
@@ -388,59 +396,61 @@ model MembershipApplication {
   linkedInProfileUrl               String?
   rejectionReason                  String?
   reviewNotes                      String?
-  flaggedSections                  String[]              @default([])
-  flaggedFields                    String[]              @default([])
-  resubmissionCount                Int                   @default(0) @map("resubmission_count")
-  rejectedAt                       DateTime?             @map("rejected_at")
-  resubmittedAt                    DateTime?             @map("resubmitted_at")
+  flaggedSections                  String[]                         @default([])
+  flaggedFields                    String[]                         @default([])
+  resubmissionCount                Int                              @default(0) @map("resubmission_count")
+  rejectedAt                       DateTime?                        @map("rejected_at")
+  resubmittedAt                    DateTime?                        @map("resubmitted_at")
   reviewedAt                       DateTime?
-  reviewedById                     String?               @map("reviewed_by_id")
-  reviewedBy                       User?                 @relation("ApplicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  createdAt                        DateTime              @default(now())
-  updatedAt                        DateTime              @updatedAt
+  reviewedById                     String?                          @map("reviewed_by_id")
+  reviewedBy                       User?                            @relation("ApplicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  createdAt                        DateTime                         @default(now())
+  updatedAt                        DateTime                         @updatedAt
+
   @@map("membership_applications")
 }
 
 model MembershipPaymentRecord {
-  id                         String                    @id @default(cuid())
-  applicationId              String                    @map("application_id")
-  application                MembershipApplication     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  purpose                    PaymentPurpose            @default(APPLICATION_FEE)
-  billingYear                Int?                      @map("billing_year")
-  paymentIntentId            String?                   @map("payment_intent_id")
-  paymentIntent              PaymentIntent?            @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
-  collectionMode             PaymentCollectionMode     @default(MANUAL_PROOF) @map("collection_mode")
-  provider                   PaymentProvider           @default(MANUAL)
+  id                         String                     @id @default(cuid())
+  applicationId              String                     @map("application_id")
+  application                MembershipApplication      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  purpose                    PaymentPurpose             @default(APPLICATION_FEE)
+  billingYear                Int?                       @map("billing_year")
+  paymentIntentId            String?                    @map("payment_intent_id")
+  paymentIntent              PaymentIntent?             @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+  collectionMode             PaymentCollectionMode      @default(MANUAL_PROOF) @map("collection_mode")
+  provider                   PaymentProvider            @default(MANUAL)
   paymentMethod              PaymentMethod
-  transactionReferenceNumber String                    @map("transaction_reference_number")
-  providerReference          String?                   @map("provider_reference")
-  externalReference          String?                   @map("external_reference")
-  checkoutRequestId          String?                   @map("checkout_request_id")
-  merchantRequestId          String?                   @map("merchant_request_id")
-  payerPhoneNumber           String?                   @map("payer_phone_number")
+  transactionReferenceNumber String                     @map("transaction_reference_number")
+  providerReference          String?                    @map("provider_reference")
+  externalReference          String?                    @map("external_reference")
+  checkoutRequestId          String?                    @map("checkout_request_id")
+  merchantRequestId          String?                    @map("merchant_request_id")
+  payerPhoneNumber           String?                    @map("payer_phone_number")
   amount                     Int?
-  baseAmount                 Int?                      @map("base_amount")
-  taxAmount                  Int?                      @map("tax_amount")
-  totalAmount                Int?                      @map("total_amount")
-  currency                   String                    @default("KES")
-  verificationStatus         PaymentVerificationStatus @default(PENDING) @map("verification_status")
+  baseAmount                 Int?                       @map("base_amount")
+  taxAmount                  Int?                       @map("tax_amount")
+  totalAmount                Int?                       @map("total_amount")
+  currency                   String                     @default("KES")
+  verificationStatus         PaymentVerificationStatus  @default(PENDING) @map("verification_status")
   verificationSource         PaymentVerificationSource? @map("verification_source")
-  rawRequestPayload          Json?                     @map("raw_request_payload")
-  rawCallbackPayload         Json?                     @map("raw_callback_payload")
-  reconciliationPayload      Json?                     @map("reconciliation_payload")
+  rawRequestPayload          Json?                      @map("raw_request_payload")
+  rawCallbackPayload         Json?                      @map("raw_callback_payload")
+  reconciliationPayload      Json?                      @map("reconciliation_payload")
   description                String?
   notes                      String?
-  proofUrl                   String?                   @map("proof_url")
-  proofOriginalName          String?                   @map("proof_original_name")
-  status                     MemberPaymentStatus       @default(VERIFIED)
-  initiatedAt                DateTime?                 @map("initiated_at")
-  callbackReceivedAt         DateTime?                 @map("callback_received_at")
-  verifiedAt                 DateTime?                 @map("verified_at")
-  paidAt                     DateTime?                 @map("paid_at")
-  recordedById               String?                   @map("recorded_by_id")
-  recordedBy                 User?                     @relation("PaymentRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
-  createdAt                  DateTime                  @default(now()) @map("created_at")
-  updatedAt                  DateTime                  @updatedAt @map("updated_at")
+  proofUrl                   String?                    @map("proof_url")
+  proofOriginalName          String?                    @map("proof_original_name")
+  status                     MemberPaymentStatus        @default(VERIFIED)
+  initiatedAt                DateTime?                  @map("initiated_at")
+  callbackReceivedAt         DateTime?                  @map("callback_received_at")
+  verifiedAt                 DateTime?                  @map("verified_at")
+  paidAt                     DateTime?                  @map("paid_at")
+  recordedById               String?                    @map("recorded_by_id")
+  recordedBy                 User?                      @relation("PaymentRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+  createdAt                  DateTime                   @default(now()) @map("created_at")
+  updatedAt                  DateTime                   @updatedAt @map("updated_at")
+
   @@map("membership_payment_records")
 }
 
@@ -465,92 +475,95 @@ model PaymentIncident {
   resolutionNote  String?                 @map("resolution_note")
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
+
   @@map("payment_incidents")
 }
 
 model MpesaC2BReceipt {
-  id                   String                @id @default(cuid())
-  applicationId        String?               @map("application_id")
+  id                   String                 @id @default(cuid())
+  applicationId        String?                @map("application_id")
   application          MembershipApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  userId               String?               @map("user_id")
-  user                 User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
-  shortCode            String?               @map("short_code")
-  billRefNumber        String?               @map("bill_ref_number")
-  invoiceNumber        String?               @map("invoice_number")
-  orgAccountBalance    String?               @map("org_account_balance")
-  thirdPartyTransId    String?               @map("third_party_trans_id")
+  userId               String?                @map("user_id")
+  user                 User?                  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shortCode            String?                @map("short_code")
+  billRefNumber        String?                @map("bill_ref_number")
+  invoiceNumber        String?                @map("invoice_number")
+  orgAccountBalance    String?                @map("org_account_balance")
+  thirdPartyTransId    String?                @map("third_party_trans_id")
   msisdn               String
-  firstName            String?               @map("first_name")
-  middleName           String?               @map("middle_name")
-  lastName             String?               @map("last_name")
-  transId              String                @unique @map("trans_id")
-  transAmount          Int                   @map("trans_amount")
-  transactionType      String?               @map("transaction_type")
-  transTime            DateTime?             @map("trans_time")
-  isValidated          Boolean               @default(true) @map("is_validated")
-  validationResultCode String?               @map("validation_result_code")
-  validationResultDesc String?               @map("validation_result_desc")
-  rawPayload           Json?                 @map("raw_payload")
-  createdAt            DateTime              @default(now()) @map("created_at")
-  updatedAt            DateTime              @updatedAt @map("updated_at")
+  firstName            String?                @map("first_name")
+  middleName           String?                @map("middle_name")
+  lastName             String?                @map("last_name")
+  transId              String                 @unique @map("trans_id")
+  transAmount          Int                    @map("trans_amount")
+  transactionType      String?                @map("transaction_type")
+  transTime            DateTime?              @map("trans_time")
+  isValidated          Boolean                @default(true) @map("is_validated")
+  validationResultCode String?                @map("validation_result_code")
+  validationResultDesc String?                @map("validation_result_desc")
+  rawPayload           Json?                  @map("raw_payload")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+
   @@map("mpesa_c2b_receipts")
 }
 
 model MpesaStkRequest {
-  id                 String                @id @default(cuid())
-  paymentIntentId    String?               @map("payment_intent_id")
-  paymentIntent      PaymentIntent?        @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
-  applicationId      String?               @map("application_id")
-  application        MembershipApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  incidents          PaymentIncident[]
-  userId             String?               @map("user_id")
-  user               User?                 @relation("MpesaRequestUser", fields: [userId], references: [id], onDelete: SetNull)
-  phoneNumber        String                @map("phone_number")
-  amount             Int
-  baseAmount         Int?                  @map("base_amount")
-  taxAmount          Int?                  @map("tax_amount")
-  currency           String                @default("KES")
-  accountReference   String                @map("account_reference")
-  transactionDesc    String                @map("transaction_desc")
-  merchantRequestId  String?               @unique @map("merchant_request_id")
-  checkoutRequestId  String?               @unique @map("checkout_request_id")
-  customerMessage    String?               @map("customer_message")
-  callbackUrl        String                @map("callback_url")
-  status             MpesaStkStatus        @default(INITIATED)
-  requestPayload     Json?                 @map("request_payload")
-  responsePayload    Json?                 @map("response_payload")
-  callbackPayload    Json?                 @map("callback_payload")
-  callbackReceivedAt DateTime?             @map("callback_received_at")
-  statusQueryPayload Json?                  @map("status_query_payload")
-  statusQueryResponse Json?                 @map("status_query_response")
-  lastStatusQueryAt  DateTime?              @map("last_status_query_at")
-  transactionStatusPayload Json?            @map("transaction_status_payload")
-  transactionStatusResponse Json?           @map("transaction_status_response")
-  transactionStatusCallbackPayload Json?    @map("transaction_status_callback_payload")
-  transactionStatusTimeoutPayload Json?     @map("transaction_status_timeout_payload")
-  transactionStatusOriginatorConversationId String? @map("transaction_status_originator_conversation_id")
-  transactionStatusConversationId String?   @map("transaction_status_conversation_id")
-  lastTransactionStatusQueryAt DateTime?    @map("last_transaction_status_query_at")
-  reconciliationAttemptCount Int            @default(0) @map("reconciliation_attempt_count")
-  lastReconciledAt     DateTime?            @map("last_reconciled_at")
-  nextReconciliationAt DateTime?            @map("next_reconciliation_at")
-  lastReconciliationSource MpesaReconciliationSource? @map("last_reconciliation_source")
-  lastReconciliationNote String?            @map("last_reconciliation_note")
-  resultCode         Int?                   @map("result_code")
-  resultDesc         String?               @map("result_desc")
-  mpesaReceiptNumber String?               @map("mpesa_receipt_number")
-  transactionDate    DateTime?             @map("transaction_date")
-  createdAt          DateTime              @default(now()) @map("created_at")
-  updatedAt          DateTime              @updatedAt @map("updated_at")
+  id                                        String                     @id @default(cuid())
+  paymentIntentId                           String?                    @map("payment_intent_id")
+  paymentIntent                             PaymentIntent?             @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+  applicationId                             String?                    @map("application_id")
+  application                               MembershipApplication?     @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  incidents                                 PaymentIncident[]
+  userId                                    String?                    @map("user_id")
+  user                                      User?                      @relation("MpesaRequestUser", fields: [userId], references: [id], onDelete: SetNull)
+  phoneNumber                               String                     @map("phone_number")
+  amount                                    Int
+  baseAmount                                Int?                       @map("base_amount")
+  taxAmount                                 Int?                       @map("tax_amount")
+  currency                                  String                     @default("KES")
+  accountReference                          String                     @map("account_reference")
+  transactionDesc                           String                     @map("transaction_desc")
+  merchantRequestId                         String?                    @unique @map("merchant_request_id")
+  checkoutRequestId                         String?                    @unique @map("checkout_request_id")
+  customerMessage                           String?                    @map("customer_message")
+  callbackUrl                               String                     @map("callback_url")
+  status                                    MpesaStkStatus             @default(INITIATED)
+  requestPayload                            Json?                      @map("request_payload")
+  responsePayload                           Json?                      @map("response_payload")
+  callbackPayload                           Json?                      @map("callback_payload")
+  callbackReceivedAt                        DateTime?                  @map("callback_received_at")
+  statusQueryPayload                        Json?                      @map("status_query_payload")
+  statusQueryResponse                       Json?                      @map("status_query_response")
+  lastStatusQueryAt                         DateTime?                  @map("last_status_query_at")
+  transactionStatusPayload                  Json?                      @map("transaction_status_payload")
+  transactionStatusResponse                 Json?                      @map("transaction_status_response")
+  transactionStatusCallbackPayload          Json?                      @map("transaction_status_callback_payload")
+  transactionStatusTimeoutPayload           Json?                      @map("transaction_status_timeout_payload")
+  transactionStatusOriginatorConversationId String?                    @map("transaction_status_originator_conversation_id")
+  transactionStatusConversationId           String?                    @map("transaction_status_conversation_id")
+  lastTransactionStatusQueryAt              DateTime?                  @map("last_transaction_status_query_at")
+  reconciliationAttemptCount                Int                        @default(0) @map("reconciliation_attempt_count")
+  lastReconciledAt                          DateTime?                  @map("last_reconciled_at")
+  nextReconciliationAt                      DateTime?                  @map("next_reconciliation_at")
+  lastReconciliationSource                  MpesaReconciliationSource? @map("last_reconciliation_source")
+  lastReconciliationNote                    String?                    @map("last_reconciliation_note")
+  resultCode                                Int?                       @map("result_code")
+  resultDesc                                String?                    @map("result_desc")
+  mpesaReceiptNumber                        String?                    @map("mpesa_receipt_number")
+  transactionDate                           DateTime?                  @map("transaction_date")
+  createdAt                                 DateTime                   @default(now()) @map("created_at")
+  updatedAt                                 DateTime                   @updatedAt @map("updated_at")
+
   @@map("mpesa_stk_requests")
 }
 
 model Account {
-  id                String @id @default(cuid())
-  userId            String @map("user_id")
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
   type              String
   provider          String
-  providerAccountId String @map("provider_account_id")
+  providerAccountId String  @map("provider_account_id")
   refresh_token     String?
   access_token      String?
   expires_at        Int?
@@ -558,7 +571,7 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@map("accounts")
@@ -598,11 +611,12 @@ model TwoFactorConfirmation {
   id     String @id @default(cuid())
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@map("two_factor_confirmations")
 }
 
 model RateLimiterFlexible {
-  key    String   @id
+  key    String    @id
   points Int
   expire DateTime?
 
@@ -618,8 +632,3 @@ model LoginRateLimitLock {
 
   @@map("login_rate_limit_locks")
 }
-
-
-
-
-
