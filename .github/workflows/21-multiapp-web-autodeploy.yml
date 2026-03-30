@@ -361,7 +361,7 @@ jobs:
       # (env sync moved earlier in preflight)
       - name: Ensure DB (python, no migrations)
         working-directory: ./scripts
-        run: python ensure_db.py --env "auto" --app "auto"
+        run: python ensure_db.py --env "auto" --app "auto" --run-migrations
 
       - name: Write deploy meta (python)
         working-directory: ./scripts
