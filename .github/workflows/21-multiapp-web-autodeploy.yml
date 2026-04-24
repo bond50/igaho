@@ -92,7 +92,7 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
       - name: Prisma generate (optional)
-        run: pnpm dlx prisma generate || true
+        run: pnpm exec prisma generate || true
       - name: Lint (optional)
         run: pnpm run lint --if-present -- --max-warnings=0 || true
       - name: TS check (optional)
@@ -116,6 +116,9 @@ jobs:
 
       - name: Enable pnpm (corepack)
         run: corepack enable
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
 
       - name: Ensure jq and curl
         run: |
@@ -314,7 +317,7 @@ jobs:
           [ -n "$DATABASE_URL" ] || { echo "::error::DATABASE_URL missing in .env.production"; exit 1; }
 
           export DATABASE_URL
-          pnpm dlx prisma migrate deploy
+          pnpm exec prisma migrate deploy
 
       - name: Export DATABASE_URL for Docker build
         shell: bash
