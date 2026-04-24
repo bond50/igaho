@@ -25,42 +25,44 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  bootstrap_env_db:
+    name: "🔐 Bootstrap Env + DB"
+    if: github.event_name != 'pull_request' && github.ref_name == 'main'
+    uses: ./.github/workflows/20-app-secrets-sync.yml
+    with:
+      env_name: ${{ github.ref_name == 'main' && 'prod' || 'develop' }}
+    secrets: inherit
+
   preflight:
     name: "🛫 Preflight — AWS/SSM/ECR/DB"
     runs-on: ubuntu-latest
+    needs: [ bootstrap_env_db ]
+    if: always() && (github.event_name == 'pull_request' || needs.bootstrap_env_db.result == 'success')
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       ready: ${{ steps.pref.outputs.ready }}
       env_name: ${{ steps.pref.outputs.env_name }}
       ecr_repo_name: ${{ steps.pref.outputs.ecr_repo_name }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11" }
       - run: python -m pip install --upgrade pip boto3
-      - uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Authenticate to AWS via OIDC
+        shell: bash
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          AWS_REGION_INPUT: ${{ env.AWS_REGION }}
+        run: bash .github/scripts/aws-oidc-login.sh
 
       - name: Verify scripts folder
         run: |
           set -e
           test -d scripts || { echo "::error::Missing scripts/"; exit 1; }
           ls -la scripts
-
-      # ✅ Early env sync (only on main, not PR)
-      - name: Early sync env to SSM
-        if: github.event_name != 'pull_request' && github.ref_name == 'main'
-        working-directory: ./scripts
-        env:
-          PUBLIC_ENV_JSON: ${{ env.PUBLIC_ENV_JSON || '' }}
-          RUNTIME_SECURE_JSON: ${{ secrets.RUNTIME_SECURE_JSON || '' }}
-        run: python env_sync.py --env "auto" --app "auto"
-
-      - name: Early ensure DB
-        if: github.event_name != 'pull_request' && github.ref_name == 'main'
-        working-directory: ./scripts
-        run: python ensure_db.py --env "auto" --app "auto"
 
       - id: pref
         name: "Preflight (strict: SSM+EC2+ECR+DB auth)"
@@ -70,12 +72,15 @@ jobs:
   quality:
     name: "✅ Quality"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     container:
       image: node:24.11.0-bookworm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             /root/.local/share/pnpm/store
@@ -96,20 +101,33 @@ jobs:
   build_push:
     name: "📦 Build & Push"
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      id-token: write
+      contents: read
     needs: [ preflight, quality ]
     if: needs.preflight.outputs.ready == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm (corepack)
+        run: corepack enable
 
       - name: Ensure jq and curl
         run: |
           sudo apt-get update
           sudo apt-get install -y jq curl
 
-      - uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Authenticate to AWS via OIDC
+        shell: bash
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          AWS_REGION_INPUT: ${{ env.AWS_REGION }}
+        run: bash .github/scripts/aws-oidc-login.sh
 
       # 🔍 Resolve EC2 + SG + public DNS from SSM (we already know env_name from preflight)
       - name: Resolve EC2 + SG + DNS
@@ -159,15 +177,16 @@ jobs:
           SG_ID="${{ steps.ec2.outputs.sg_id }}"
           IP="${{ steps.runner_ip.outputs.ip }}/32"
           echo "Authorizing $IP on sg $SG_ID (5432/tcp)…"
-          aws ec2 authorize-security-group-ingress \
+          if aws ec2 authorize-security-group-ingress \
             --group-id "$SG_ID" \
             --protocol tcp \
             --port 5432 \
-            --cidr "$IP" || {
-              echo "Ingress rule may already exist; continuing."
-            }
-
-
+            --cidr "$IP"; then
+            echo "opened=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Ingress rule already existed or authorize failed; skipping revoke for this run."
+            echo "opened=false" >> "$GITHUB_OUTPUT"
+          fi
 
       # 🧬 Create .env.production from PUBLIC_ENV_JSON + SSM (plain + secure)
       - name: Create .env.production from SSM env
@@ -176,6 +195,17 @@ jobs:
           PUBLIC_ENV_JSON: ${{ env.PUBLIC_ENV_JSON }}
         run: |
           set -euo pipefail
+
+          merge_json_env() {
+            local json="$1"
+            [ -n "$json" ] || return 0
+
+            while IFS='=' read -r key value; do
+              [ -n "$key" ] || continue
+              sed -i "/^${key}=/d" .env.production
+              printf '%s=%s\n' "$key" "$value" >> .env.production
+            done < <(printf '%s' "$json" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
+          }
 
           ENV_NAME="${{ needs.preflight.outputs.env_name }}"
           APP_SLUG="${{ env.APP }}"
@@ -190,9 +220,7 @@ jobs:
           # 1) Public env (NEXT_PUBLIC_*) from repo vars (unchanged)
           if [ -n "${PUBLIC_ENV_JSON:-}" ]; then
             echo "Merging PUBLIC_ENV_JSON into .env.production"
-            echo "$PUBLIC_ENV_JSON" \
-              | jq -r 'to_entries|.[]|"\(.key)=\(.value)"' \
-              >> .env.production || true
+            merge_json_env "$PUBLIC_ENV_JSON" || true
           else
             echo "No PUBLIC_ENV_JSON provided; skipping public env merge."
           fi
@@ -210,7 +238,7 @@ jobs:
                 --query 'Parameter.Value' \
                 --output text)
               echo "Loaded $PARAM from SSM; merging into .env.production"
-              echo "$JSON" | jq -r 'to_entries|.[]|"\(.key)=\(.value)"' >> .env.production
+              merge_json_env "$JSON"
             else
               echo "Param $PARAM not found; skipping."
             fi
@@ -276,6 +304,27 @@ jobs:
           echo "DATABASE_URL after tweak (masked):"
           grep '^DATABASE_URL=' .env.production | sed 's/=.*/=***MASKED***/'
 
+      - name: Run Prisma migrations (build-time)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Running prisma migrate deploy BEFORE build..."
+
+          DATABASE_URL="$(grep '^DATABASE_URL=' .env.production | tail -n1 | cut -d= -f2-)"
+          [ -n "$DATABASE_URL" ] || { echo "::error::DATABASE_URL missing in .env.production"; exit 1; }
+
+          export DATABASE_URL
+          pnpm dlx prisma migrate deploy
+
+      - name: Export DATABASE_URL for Docker build
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATABASE_URL="$(grep '^DATABASE_URL=' .env.production | tail -n1 | cut -d= -f2-)"
+          [ -n "$DATABASE_URL" ] || { echo "::error::DATABASE_URL missing in .env.production"; exit 1; }
+          echo "::add-mask::$DATABASE_URL"
+          echo "DATABASE_URL_FOR_DOCKER_BUILD=$DATABASE_URL" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Login to ECR
@@ -301,6 +350,8 @@ jobs:
         with:
           context: .
           push: true
+          secrets: |
+            database_url=${{ env.DATABASE_URL_FOR_DOCKER_BUILD }}
           # 👇 Build for your EC2 host architecture (t3a.* → x86_64)
           platforms: linux/amd64
           tags: ${{ steps.tags.outputs.sha }}
@@ -319,6 +370,8 @@ jobs:
         with:
           context: .
           push: true
+          secrets: |
+            database_url=${{ env.DATABASE_URL_FOR_DOCKER_BUILD }}
           # 👇 Build for EC2 host (x86_64)
           platforms: linux/amd64
           tags: |
@@ -330,16 +383,26 @@ jobs:
           provenance: false
           sbom: false
 
-
-
       # 🔐 ALWAYS close the DB hole, even if build fails
       - name: Close DB for CI runner
         if: always()
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${{ steps.open_db.outputs.opened || 'false' }}" != "true" ]; then
+            echo "Skipping DB ingress revoke: this run did not open the rule."
+            exit 0
+          fi
+
           SG_ID="${{ steps.ec2.outputs.sg_id }}"
-          IP="${{ steps.runner_ip.outputs.ip }}/32"
+          RUNNER_IP="${{ steps.runner_ip.outputs.ip }}"
+
+          if [ -z "${SG_ID}" ] || [ -z "${RUNNER_IP}" ]; then
+            echo "Skipping DB ingress revoke: missing sg_id or runner_ip."
+            exit 0
+          fi
+
+          IP="${RUNNER_IP}/32"
           echo "Revoking $IP on sg $SG_ID (5432/tcp)…"
           aws ec2 revoke-security-group-ingress \
             --group-id "$SG_ID" \
@@ -352,22 +415,28 @@ jobs:
   deploy_meta:
     name: "📝 Deploy Meta (SSM env + DB)"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
     needs: [ preflight, build_push ]
     if: github.event_name != 'pull_request' && github.ref_name == 'main' && needs.preflight.outputs.ready == 'true'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11" }
       - run: python -m pip install --upgrade pip boto3
-      - uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+      - name: Authenticate to AWS via OIDC
+        shell: bash
+        env:
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          AWS_REGION_INPUT: ${{ env.AWS_REGION }}
+        run: bash .github/scripts/aws-oidc-login.sh
 
-      # (env sync moved earlier in preflight)
+      # (env sync/bootstrap moved earlier via bootstrap_env_db)
       - name: Ensure DB (python, no migrations)
         working-directory: ./scripts
-        run: python ensure_db.py --env "auto" --app "auto" --run-migrations
+        run: python ensure_db.py --env "auto" --app "auto"
 
       - name: Write deploy meta (python)
         working-directory: ./scripts
@@ -410,8 +479,9 @@ jobs:
 
   notify_failure_main:
     name: "🔔 Notify — FAILURE (main)"
-    needs: [ preflight, quality, build_push, deploy_meta, invoke_render ]
+    needs: [ bootstrap_env_db, preflight, quality, build_push, deploy_meta, invoke_render ]
     if: github.event_name != 'pull_request' && (
+      needs.bootstrap_env_db.result == 'failure' || needs.bootstrap_env_db.result == 'cancelled' ||
       needs.preflight.result    == 'failure' || needs.preflight.result    == 'cancelled' ||
       needs.quality.result      == 'failure' || needs.quality.result      == 'cancelled' ||
       needs.build_push.result   == 'failure' || needs.build_push.result   == 'cancelled' ||
@@ -432,8 +502,9 @@ jobs:
 
   notify_success_main:
     name: "🔔 Notify — SUCCESS"
-    needs: [ preflight, quality, build_push, deploy_meta, invoke_render ]
+    needs: [ bootstrap_env_db, preflight, quality, build_push, deploy_meta, invoke_render ]
     if: github.event_name != 'pull_request' &&
+      needs.bootstrap_env_db.result == 'success' &&
       needs.preflight.result    == 'success' &&
       needs.quality.result      == 'success' &&
       needs.build_push.result   == 'success' &&
@@ -449,4 +520,3 @@ jobs:
       email_subject: "Autodeploy SUCCEEDED"
       email_body: "branch=${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
     secrets: inherit
-
