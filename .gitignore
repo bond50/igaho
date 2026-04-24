@@ -31,6 +31,7 @@ logs/
 !.env.example
 .envrc
 .envrc.local
+secrets/
 # prisma sometimes uses its own .env
 prisma/.env
 # package managers can hold tokens
@@ -48,14 +49,8 @@ prisma/.env
 .scripts.zip
 .vercel
 lib/generated/prisma
+prisma/src/generated/
+extra/
 
 # --- Docker (the file itself should be a separate .dockerignore) ---
 .dockerignore
-
-/prisma/src/generated/prisma
-
-extra/
-**/extra/
-
-secrets/
-**/secrets/

@@ -22,6 +22,7 @@ env:
   APP: ${{ vars.APP || github.event.repository.name }}
   PUBLIC_ENV_JSON: ${{ vars.PUBLIC_ENV_JSON || '' }}
   ACME_EMAIL: ${{ vars.ACME_EMAIL || '' }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   preflight:
@@ -55,6 +56,11 @@ jobs:
           PUBLIC_ENV_JSON: ${{ env.PUBLIC_ENV_JSON || '' }}
           RUNTIME_SECURE_JSON: ${{ secrets.RUNTIME_SECURE_JSON || '' }}
         run: python env_sync.py --env "auto" --app "auto"
+
+      - name: Early ensure DB
+        if: github.event_name != 'pull_request' && github.ref_name == 'main'
+        working-directory: ./scripts
+        run: python ensure_db.py --env "auto" --app "auto"
 
       - id: pref
         name: "Preflight (strict: SSM+EC2+ECR+DB auth)"
@@ -443,3 +449,4 @@ jobs:
       email_subject: "Autodeploy SUCCEEDED"
       email_body: "branch=${{ github.ref_name }} sha=${{ github.sha }} (run ${{ github.run_id }})"
     secrets: inherit
+

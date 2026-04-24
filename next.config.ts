@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 const isWindows = process.platform === 'win32';
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ['192.168.254.104'],
+  allowedDevOrigins: ['192.168.100.125'],
 
   ...(isWindows ? {} : { output: 'standalone' }),
 

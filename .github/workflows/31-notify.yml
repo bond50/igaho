@@ -11,6 +11,8 @@ on:
       slack_mention: { type: string, required: false, default: "none" } # none|here|channel
       email_subject: { type: string, required: false, default: "" }
       email_body: { type: string, required: false, default: "" }
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   id-token: write
@@ -25,7 +27,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ inputs.region != '' && inputs.region || vars.AWS_REGION || 'us-east-1' }}
-      - name:  Ensure jq
+      - name: Ensure jq
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y jq
 

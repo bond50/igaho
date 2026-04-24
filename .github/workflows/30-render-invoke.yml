@@ -15,6 +15,8 @@ on:
         type: string
         required: false
         default: ""
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   id-token: write
