@@ -221,18 +221,20 @@ def main():
     ).decode('ascii')
 
     chunks = [b64[i:i + 1200] for i in range(0, len(b64), 1200)]  # short lines, safe for printf
-    commands = [
+    bash_cmds = [
         'set -euo pipefail',
         'rm -f /tmp/ensure_db.sh /tmp/ensure_db.sh.b64 || true',
     ]
     for c in chunks:
-        commands.append(f'printf %s {shlex.quote(c)} >> /tmp/ensure_db.sh.b64')
-    commands += [
+        bash_cmds.append(f'printf %s {shlex.quote(c)} >> /tmp/ensure_db.sh.b64')
+    bash_cmds += [
         'base64 -d /tmp/ensure_db.sh.b64 > /tmp/ensure_db.sh',
         'chmod +x /tmp/ensure_db.sh',
         # inject env only on exec line (don’t leak secrets in logs)
         f'APP={shlex.quote(app)} ENV_NAME={shlex.quote(env_name)} RUN_MIGRATIONS={"true" if args.run_migrations else "false"} /tmp/ensure_db.sh',
     ]
+    bash_payload = ' && '.join(bash_cmds)
+    commands = [f"bash -lc {shlex.quote(bash_payload)}"]
 
     resp = ssm.send_command(
         DocumentName="AWS-RunShellScript",
