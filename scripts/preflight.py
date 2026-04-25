@@ -94,8 +94,17 @@ t=$(curl -sS -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-meta
 az=$(curl -sS -H "X-aws-ec2-metadata-token: ${t}" http://169.254.169.254/latest/meta-data/placement/availability-zone || true)
 REGION="${az::-1}"; : "${REGION:?missing region}"
 
-command -v jq >/dev/null 2>&1 || dnf -y install jq awscli >/dev/null 2>&1 || true
-command -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 90; }
+export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+install_pkg() {
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y >/dev/null 2>&1 || true
+    apt-get install -y "$@" >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf -y install "$@" >/dev/null 2>&1 || true
+  fi
+}
+command -v jq >/dev/null 2>&1 || install_pkg jqcommand -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 90; }
 
 PLA="$(aws ssm get-parameter --region "$REGION" --name "/infra/$ENV/$APP/env/plain" --query 'Parameter.Value' --output text 2>/dev/null || echo '{}')"
 SEC="$(aws ssm get-parameter --with-decryption --region "$REGION" --name "/infra/$ENV/$APP/env/secure" --query 'Parameter.Value' --output text 2>/dev/null || echo '{}')"
