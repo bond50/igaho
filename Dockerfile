@@ -56,6 +56,13 @@ RUN pnpm prisma generate
 ARG CI=1
 ENV CI=${CI}
 
+# Page-data collection instantiates the Prisma client at module load, which
+# throws if DATABASE_URL is unset — it only needs a syntactically valid
+# connection string here, never a reachable one (no queries run at build
+# time). Real connectivity is only needed at container runtime.
+ARG DATABASE_URL=""
+ENV DATABASE_URL=${DATABASE_URL}
+
 RUN --mount=type=cache,target=/app/.next/cache \
     NEXT_TELEMETRY_DISABLED=1 \
     pnpm run build

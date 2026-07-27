@@ -61,6 +61,8 @@ jobs:
                   tags: |
                       ghcr.io/bond50/igaho:latest
                       ghcr.io/bond50/igaho:${{ github.sha }}
+                  build-args: |
+                      DATABASE_URL=postgresql://ci:ci@127.0.0.1:5432/ci?schema=public
 
             - name: Build dispatch payload
               id: payload
