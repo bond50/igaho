@@ -1,0 +1,120 @@
+name: 30 - Deploy to Hostinger
+
+# Manual for now, during migration off AWS. Builds + pushes to GHCR, then
+# triggers infra-hostinger-v1's deploy workflow via repository_dispatch.
+# The existing AWS path (21-multiapp-web-autodeploy.yml) is completely
+# untouched by this file and stays live as rollback during the migration.
+#
+# update_dns defaults to false deliberately: the first few runs should
+# verify the deploy works BEFORE the real iganopda.org DNS record moves
+# off AWS. Only flip it to true once you've confirmed the site is good.
+
+on:
+    workflow_dispatch:
+        inputs:
+            site_state:
+                description: "Site state to apply on Hostinger"
+                type: choice
+                options: ["enabled", "suspended", "removed"]
+                default: "enabled"
+            update_dns:
+                description: "Point iganopda.org's real DNS at Hostinger? Only enable once verified working."
+                type: boolean
+                default: false
+            health_check:
+                description: "Run the post-deploy health check against the public domain? Disable for pre-DNS-cutover test deploys (public DNS still points at AWS until update_dns is used)."
+                type: boolean
+                default: true
+
+permissions:
+    contents: read
+    packages: write
+
+concurrency:
+    group: deploy-hostinger-igano
+    cancel-in-progress: false
+
+jobs:
+    build-and-dispatch:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GHCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Build and push image
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  push: true
+                  platforms: linux/amd64
+                  tags: |
+                      ghcr.io/bond50/igaho:latest
+                      ghcr.io/bond50/igaho:${{ github.sha }}
+
+            - name: Build dispatch payload
+              id: payload
+              env:
+                  RUNTIME_SECURE_JSON: ${{ secrets.RUNTIME_SECURE_JSON }}
+                  HOSTINGER_DB_PASSWORD: ${{ secrets.HOSTINGER_DB_PASSWORD }}
+                  SITE_STATE: ${{ inputs.site_state }}
+                  UPDATE_DNS: ${{ inputs.update_dns }}
+                  HEALTH_CHECK: ${{ inputs.health_check }}
+                  IMAGE_TAG: ${{ github.sha }}
+              run: |
+                  python3 - <<'PY'
+                  import json, os
+
+                  env_json = json.loads(os.environ.get("RUNTIME_SECURE_JSON") or "{}")
+                  # Only value that legitimately differs by hosting environment —
+                  # everything else in RUNTIME_SECURE_JSON (Daraja, Cloudinary,
+                  # OAuth, Resend) is environment-independent and reused as-is.
+                  env_json["DATABASE_URL"] = (
+                      f"postgresql://igano:{os.environ['HOSTINGER_DB_PASSWORD']}"
+                      "@postgres:5432/igano?schema=public"
+                  )
+
+                  dns_records = []
+                  if os.environ["UPDATE_DNS"] == "true":
+                      dns_records = [
+                          {"zone": "iganopda.org", "record_name": "@", "proxied": True},
+                          {"zone": "iganopda.org", "record_name": "www", "proxied": True},
+                      ]
+
+                  payload = {
+                      "site_name": "igano",
+                      "site_image": f"ghcr.io/bond50/igaho:{os.environ['IMAGE_TAG']}",
+                      "site_container_port": 3000,
+                      "site_domain": "iganopda.org",
+                      "site_state": os.environ["SITE_STATE"],
+                      "site_db_name": "igano",
+                      "site_db_user": "igano",
+                      "site_db_password": os.environ["HOSTINGER_DB_PASSWORD"],
+                      "site_env_json": env_json,
+                      "site_health_check_enabled": os.environ["HEALTH_CHECK"] == "true",
+                      "cloudflare_dns_records": dns_records,
+                  }
+
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as gh_out:
+                      gh_out.write("payload<<PAYLOAD_EOF\n")
+                      gh_out.write(json.dumps(payload))
+                      gh_out.write("\nPAYLOAD_EOF\n")
+                  PY
+
+            - name: Trigger infra-hostinger-v1 deploy
+              uses: peter-evans/repository-dispatch@v3
+              with:
+                  token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+                  repository: bond50/infra-hostinger-v1
+                  event-type: deploy-site
+                  client-payload: ${{ steps.payload.outputs.payload }}
