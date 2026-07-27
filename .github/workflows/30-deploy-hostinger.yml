@@ -93,15 +93,20 @@ jobs:
                           {"zone": "iganopda.org", "record_name": "www", "proxied": True},
                       ]
 
+                  # site_db is nested (not flat site_db_name/user/password) to
+                  # stay under GitHub's 10-top-level-property limit for
+                  # repository_dispatch client_payload.
                   payload = {
                       "site_name": "igano",
                       "site_image": f"ghcr.io/bond50/igaho:{os.environ['IMAGE_TAG']}",
                       "site_container_port": 3000,
                       "site_domain": "iganopda.org",
                       "site_state": os.environ["SITE_STATE"],
-                      "site_db_name": "igano",
-                      "site_db_user": "igano",
-                      "site_db_password": os.environ["HOSTINGER_DB_PASSWORD"],
+                      "site_db": {
+                          "name": "igano",
+                          "user": "igano",
+                          "password": os.environ["HOSTINGER_DB_PASSWORD"],
+                      },
                       "site_env_json": env_json,
                       "site_health_check_enabled": os.environ["HEALTH_CHECK"] == "true",
                       "cloudflare_dns_records": dns_records,
