@@ -1,15 +1,25 @@
 name: 30 - Deploy to Hostinger
 
-# Manual for now, during migration off AWS. Builds + pushes to GHCR, then
-# triggers infra-hostinger-v1's deploy workflow via repository_dispatch.
-# The existing AWS path (21-multiapp-web-autodeploy.yml) is completely
-# untouched by this file and stays live as rollback during the migration.
+# Migration complete — this is now the live auto-deploy path: every push
+# to main builds + pushes to GHCR, then triggers infra-hostinger-v1's
+# deploy workflow via repository_dispatch, with DNS pointed at Hostinger
+# and the health check enabled (public DNS resolves there now).
 #
-# update_dns defaults to false deliberately: the first few runs should
-# verify the deploy works BEFORE the real iganopda.org DNS record moves
-# off AWS. Only flip it to true once you've confirmed the site is good.
+# The AWS path (21-multiapp-web-autodeploy.yml) is untouched by this file
+# and stays in the repo, manual-dispatch-only, in case of rollback.
+#
+# Manual workflow_dispatch runs still support overriding site_state/
+# update_dns/health_check (e.g. to suspend the site, or to test something
+# without touching DNS) — push-triggered runs always use the enabled/
+# DNS-on/health-check-on defaults, regardless of those inputs' own
+# defaults (GitHub Actions can't distinguish "input not provided" from
+# "explicitly false" via a plain `||` fallback, so this is resolved
+# explicitly in the "Resolve effective deploy settings" step below rather
+# than in the trigger/input definitions themselves).
 
 on:
+    push:
+        branches: [main]
     workflow_dispatch:
         inputs:
             site_state:
@@ -18,11 +28,11 @@ on:
                 options: ["enabled", "suspended", "removed"]
                 default: "enabled"
             update_dns:
-                description: "Point iganopda.org's real DNS at Hostinger? Only enable once verified working."
+                description: "Point iganopda.org's real DNS at Hostinger?"
                 type: boolean
-                default: false
+                default: true
             health_check:
-                description: "Run the post-deploy health check against the public domain? Disable for pre-DNS-cutover test deploys (public DNS still points at AWS until update_dns is used)."
+                description: "Run the post-deploy health check against the public domain?"
                 type: boolean
                 default: true
 
@@ -64,14 +74,34 @@ jobs:
                   build-args: |
                       DATABASE_URL=postgresql://ci:ci@127.0.0.1:5432/ci?schema=public
 
+            - name: Resolve effective deploy settings
+              id: settings
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  INPUT_SITE_STATE: ${{ inputs.site_state }}
+                  INPUT_UPDATE_DNS: ${{ inputs.update_dns }}
+                  INPUT_HEALTH_CHECK: ${{ inputs.health_check }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+                    echo "site_state=${INPUT_SITE_STATE}" >> "$GITHUB_OUTPUT"
+                    echo "update_dns=${INPUT_UPDATE_DNS}" >> "$GITHUB_OUTPUT"
+                    echo "health_check=${INPUT_HEALTH_CHECK}" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "site_state=enabled" >> "$GITHUB_OUTPUT"
+                    echo "update_dns=true" >> "$GITHUB_OUTPUT"
+                    echo "health_check=true" >> "$GITHUB_OUTPUT"
+                  fi
+
             - name: Build dispatch payload
               id: payload
               env:
                   RUNTIME_SECURE_JSON: ${{ secrets.RUNTIME_SECURE_JSON }}
                   HOSTINGER_DB_PASSWORD: ${{ secrets.HOSTINGER_DB_PASSWORD }}
-                  SITE_STATE: ${{ inputs.site_state }}
-                  UPDATE_DNS: ${{ inputs.update_dns }}
-                  HEALTH_CHECK: ${{ inputs.health_check }}
+                  SITE_STATE: ${{ steps.settings.outputs.site_state }}
+                  UPDATE_DNS: ${{ steps.settings.outputs.update_dns }}
+                  HEALTH_CHECK: ${{ steps.settings.outputs.health_check }}
                   IMAGE_TAG: ${{ github.sha }}
               run: |
                   python3 - <<'PY'
