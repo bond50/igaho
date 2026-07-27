@@ -76,13 +76,19 @@ jobs:
               run: |
                   python3 - <<'PY'
                   import json, os
+                  from urllib.parse import quote
 
                   env_json = json.loads(os.environ.get("RUNTIME_SECURE_JSON") or "{}")
                   # Only value that legitimately differs by hosting environment —
                   # everything else in RUNTIME_SECURE_JSON (Daraja, Cloudinary,
                   # OAuth, Resend) is environment-independent and reused as-is.
+                  # Percent-encode the password: openssl rand -base64 can produce
+                  # '/', '+', '=' which otherwise break URL parsing (hit this for
+                  # real — Prisma failed with P1013 "invalid port number" because
+                  # an unencoded '/' in the password split the URL wrong).
+                  db_password = quote(os.environ["HOSTINGER_DB_PASSWORD"], safe="")
                   env_json["DATABASE_URL"] = (
-                      f"postgresql://igano:{os.environ['HOSTINGER_DB_PASSWORD']}"
+                      f"postgresql://igano:{db_password}"
                       "@postgres:5432/igano?schema=public"
                   )
 
